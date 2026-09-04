@@ -13,7 +13,10 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useSendEmail } from '@workspace/api-client-react';
+import type { SendEmailRequest } from '@workspace/api-client-react';
 import { useColors } from '@/hooks/useColors';
+import { KeyboardAwareScrollViewCompat } from '@/components/KeyboardAwareScrollViewCompat';
 
 type Format = {
   id: string;
@@ -181,9 +184,21 @@ export default function HomeScreen() {
   const [domainDraft, setDomainDraft] = useState<string>('');
   const [showAddFormat, setShowAddFormat] = useState<boolean>(false);
   const [showAddDomain, setShowAddDomain] = useState<boolean>(false);
+  const [showEmailSettings, setShowEmailSettings] = useState<boolean>(false);
+  const [smtpHost, setSmtpHost] = useState<string>('');
+  const [smtpPort, setSmtpPort] = useState<string>('587');
+  const [smtpUsername, setSmtpUsername] = useState<string>('');
+  const [smtpPassword, setSmtpPassword] = useState<string>('');
+  const [smtpSecure, setSmtpSecure] = useState<boolean>(false);
+  const [fromEmail, setFromEmail] = useState<string>('');
+  const [emailSubject, setEmailSubject] = useState<string>('Your generated email');
+  const [emailBody, setEmailBody] = useState<string>(
+    'Hello,\n\nThis is a sample message sent to a generated email address.',
+  );
   const [addresses, setAddresses] = useState<Address[]>(() =>
     makeAddresses(['mail.ru'], DEFAULT_FORMATS),
   );
+  const sendEmailMutation = useSendEmail();
 
   const featured = addresses[0];
   const selectedFormats = useMemo(
@@ -333,6 +348,61 @@ export default function HomeScreen() {
     );
   };
 
+  const sendGeneratedEmail = async () => {
+    const port = Number.parseInt(smtpPort, 10);
+    const recipients = addresses.map((address) => address.value);
+    const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+    if (recipients.length === 0) {
+      Alert.alert('Nothing to send', 'Generate at least one address first.');
+      return;
+    }
+    if (!smtpHost.trim() || !smtpUsername.trim() || !smtpPassword) {
+      Alert.alert('Complete SMTP settings', 'Add the server, username, and password.');
+      return;
+    }
+    if (!Number.isInteger(port) || port < 1 || port > 65535) {
+      Alert.alert('Check the SMTP port', 'Use a port between 1 and 65535.');
+      return;
+    }
+    if (!emailPattern.test(fromEmail.trim())) {
+      Alert.alert('Check the sender email', 'Enter a valid From email address.');
+      return;
+    }
+    if (!emailSubject.trim() || !emailBody.trim()) {
+      Alert.alert('Add a subject and body', 'Both fields are required before sending.');
+      return;
+    }
+
+    const request: SendEmailRequest = {
+      smtp: {
+        host: smtpHost.trim(),
+        port,
+        username: smtpUsername.trim(),
+        password: smtpPassword,
+        secure: smtpSecure,
+        fromEmail: fromEmail.trim(),
+      },
+      recipients,
+      subject: emailSubject.trim(),
+      body: emailBody.trim(),
+    };
+
+    try {
+      const result = await sendEmailMutation.mutateAsync({ data: request });
+      Alert.alert(
+        'Email sent',
+        `Sent to ${result.sent} generated address${result.sent === 1 ? '' : 'es'}.`,
+      );
+      setSmtpPassword('');
+    } catch {
+      Alert.alert(
+        'Email could not be sent',
+        'Check the SMTP server settings and credentials, then try again.',
+      );
+    }
+  };
+
   return (
     <View
       style={[
@@ -349,6 +419,9 @@ export default function HomeScreen() {
           { paddingBottom: Math.max(insets.bottom, 24) + 12 },
         ]}
         showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="on-drag"
+        renderScrollComponent={(props) => <KeyboardAwareScrollViewCompat {...props} />}
         ListHeaderComponent={
           <View>
             <View style={styles.topBar}>
@@ -749,6 +822,204 @@ export default function HomeScreen() {
               ))}
             </View>
 
+            <Text style={[styles.sectionLabel, { color: colors.mutedForeground }]}>
+              SEND EMAIL
+            </Text>
+            <Pressable
+              testID="email-settings-toggle"
+              accessibilityRole="button"
+              accessibilityLabel={`${showEmailSettings ? 'Close' : 'Open'} email sending settings`}
+              onPress={() => setShowEmailSettings((visible) => !visible)}
+              style={({ pressed }) => [
+                styles.emailSettingsHeader,
+                {
+                  backgroundColor: colors.card,
+                  borderColor: colors.border,
+                  opacity: pressed ? 0.75 : 1,
+                },
+              ]}
+            >
+              <View style={styles.emailSettingsTitleWrap}>
+                <View style={[styles.emailIcon, { backgroundColor: colors.secondary }]}>
+                  <Feather name="send" size={16} color={colors.accent} />
+                </View>
+                <View style={styles.emailSettingsTitleCopy}>
+                  <Text style={[styles.emailSettingsTitle, { color: colors.foreground }]}>
+                    SMTP delivery
+                  </Text>
+                  <Text style={[styles.emailSettingsSubtitle, { color: colors.mutedForeground }]}>
+                    {addresses.length} generated recipient{addresses.length === 1 ? '' : 's'}
+                  </Text>
+                </View>
+              </View>
+              <Feather
+                name={showEmailSettings ? 'chevron-up' : 'chevron-down'}
+                size={18}
+                color={colors.mutedForeground}
+              />
+            </Pressable>
+            {showEmailSettings ? (
+              <View style={[styles.emailSettingsPanel, { backgroundColor: colors.card }]}>
+                <Text style={[styles.emailSecurityNote, { color: colors.mutedForeground }]}>
+                  SMTP credentials are used for this send only and are not saved.
+                </Text>
+                <Text style={[styles.emailFieldLabel, { color: colors.mutedForeground }]}>
+                  SMTP SERVER
+                </Text>
+                <TextInput
+                  testID="smtp-host-input"
+                  accessibilityLabel="SMTP server host"
+                  value={smtpHost}
+                  onChangeText={setSmtpHost}
+                  placeholder="smtp.example.com"
+                  placeholderTextColor={colors.mutedForeground}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  style={[styles.emailInput, { backgroundColor: colors.secondary, color: colors.foreground }]}
+                />
+                <View style={styles.emailFieldRow}>
+                  <View style={styles.emailFieldGrow}>
+                    <Text style={[styles.emailFieldLabel, { color: colors.mutedForeground }]}>
+                      PORT
+                    </Text>
+                    <TextInput
+                      testID="smtp-port-input"
+                      accessibilityLabel="SMTP server port"
+                      value={smtpPort}
+                      onChangeText={(value) => setSmtpPort(value.replace(/[^0-9]/g, ''))}
+                      placeholder="587"
+                      placeholderTextColor={colors.mutedForeground}
+                      keyboardType="number-pad"
+                      style={[
+                        styles.emailInput,
+                        { backgroundColor: colors.secondary, color: colors.foreground },
+                      ]}
+                    />
+                  </View>
+                  <Pressable
+                    testID="smtp-secure-toggle"
+                    accessibilityRole="switch"
+                    accessibilityState={{ checked: smtpSecure }}
+                    accessibilityLabel="Use secure SMTP connection"
+                    onPress={() => setSmtpSecure((secure) => !secure)}
+                    style={({ pressed }) => [
+                      styles.secureToggle,
+                      {
+                        backgroundColor: smtpSecure ? colors.accent : colors.secondary,
+                        borderColor: smtpSecure ? colors.accent : colors.border,
+                        opacity: pressed ? 0.75 : 1,
+                      },
+                    ]}
+                  >
+                    <Feather
+                      name={smtpSecure ? 'lock' : 'unlock'}
+                      size={15}
+                      color={smtpSecure ? colors.accentForeground : colors.mutedForeground}
+                    />
+                    <Text
+                      style={[
+                        styles.secureToggleText,
+                        { color: smtpSecure ? colors.accentForeground : colors.foreground },
+                      ]}
+                    >
+                      Secure
+                    </Text>
+                  </Pressable>
+                </View>
+                <Text style={[styles.emailFieldLabel, { color: colors.mutedForeground }]}>
+                  LOGIN
+                </Text>
+                <TextInput
+                  testID="smtp-username-input"
+                  accessibilityLabel="SMTP username"
+                  value={smtpUsername}
+                  onChangeText={setSmtpUsername}
+                  placeholder="Username"
+                  placeholderTextColor={colors.mutedForeground}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  style={[styles.emailInput, { backgroundColor: colors.secondary, color: colors.foreground }]}
+                />
+                <TextInput
+                  testID="smtp-password-input"
+                  accessibilityLabel="SMTP password"
+                  value={smtpPassword}
+                  onChangeText={setSmtpPassword}
+                  placeholder="Password"
+                  placeholderTextColor={colors.mutedForeground}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  secureTextEntry
+                  style={[styles.emailInput, { backgroundColor: colors.secondary, color: colors.foreground }]}
+                />
+                <Text style={[styles.emailFieldLabel, { color: colors.mutedForeground }]}>
+                  MESSAGE
+                </Text>
+                <TextInput
+                  testID="from-email-input"
+                  accessibilityLabel="From email address"
+                  value={fromEmail}
+                  onChangeText={setFromEmail}
+                  placeholder="you@example.com"
+                  placeholderTextColor={colors.mutedForeground}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  keyboardType="email-address"
+                  style={[styles.emailInput, { backgroundColor: colors.secondary, color: colors.foreground }]}
+                />
+                <TextInput
+                  testID="email-subject-input"
+                  accessibilityLabel="Email subject"
+                  value={emailSubject}
+                  onChangeText={setEmailSubject}
+                  placeholder="Subject"
+                  placeholderTextColor={colors.mutedForeground}
+                  style={[styles.emailInput, { backgroundColor: colors.secondary, color: colors.foreground }]}
+                />
+                <TextInput
+                  testID="email-body-input"
+                  accessibilityLabel="Email body"
+                  value={emailBody}
+                  onChangeText={setEmailBody}
+                  placeholder="Write your message"
+                  placeholderTextColor={colors.mutedForeground}
+                  multiline
+                  textAlignVertical="top"
+                  style={[
+                    styles.emailInput,
+                    styles.emailBodyInput,
+                    { backgroundColor: colors.secondary, color: colors.foreground },
+                  ]}
+                />
+                <Pressable
+                  testID="send-generated-email-button"
+                  accessibilityRole="button"
+                  accessibilityLabel={`Send email to ${addresses.length} generated recipients`}
+                  onPress={sendGeneratedEmail}
+                  disabled={sendEmailMutation.isPending || addresses.length === 0}
+                  style={({ pressed }) => [
+                    styles.sendEmailButton,
+                    {
+                      backgroundColor: colors.primary,
+                      opacity:
+                        sendEmailMutation.isPending || addresses.length === 0
+                          ? 0.45
+                          : pressed
+                            ? 0.75
+                            : 1,
+                    },
+                  ]}
+                >
+                  <Feather name="send" size={16} color={colors.primaryForeground} />
+                  <Text style={[styles.generateButtonText, { color: colors.primaryForeground }]}>
+                    {sendEmailMutation.isPending
+                      ? 'Sending…'
+                      : `Send to ${addresses.length} generated`}
+                  </Text>
+                </Pressable>
+              </View>
+            ) : null}
+
             <View style={styles.listHeading}>
               <View>
                 <Text style={[styles.listTitle, { color: colors.foreground }]}>
@@ -1089,6 +1360,105 @@ const styles = StyleSheet.create({
   addFormatPanel: {
     marginTop: 9,
     padding: 11,
+    borderRadius: 14,
+    gap: 8,
+  },
+  emailSettingsHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    minHeight: 64,
+    paddingHorizontal: 13,
+    borderWidth: 1,
+    borderRadius: 16,
+  },
+  emailSettingsTitleWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  emailIcon: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: 34,
+    height: 34,
+    borderRadius: 11,
+  },
+  emailSettingsTitleCopy: {
+    flex: 1,
+    marginLeft: 10,
+  },
+  emailSettingsTitle: {
+    fontFamily: 'Inter_600SemiBold',
+    fontSize: 13,
+  },
+  emailSettingsSubtitle: {
+    marginTop: 3,
+    fontFamily: 'Inter_400Regular',
+    fontSize: 11,
+  },
+  emailSettingsPanel: {
+    marginTop: 8,
+    padding: 13,
+    borderRadius: 16,
+    gap: 9,
+  },
+  emailSecurityNote: {
+    marginBottom: 3,
+    fontFamily: 'Inter_400Regular',
+    fontSize: 11,
+    lineHeight: 16,
+  },
+  emailFieldLabel: {
+    marginTop: 3,
+    fontFamily: 'Inter_700Bold',
+    fontSize: 9,
+    letterSpacing: 1.2,
+  },
+  emailInput: {
+    minHeight: 45,
+    paddingHorizontal: 13,
+    paddingVertical: 0,
+    borderRadius: 12,
+    fontFamily: 'Inter_500Medium',
+    fontSize: 13,
+  },
+  emailBodyInput: {
+    minHeight: 118,
+    paddingTop: 12,
+    paddingBottom: 12,
+  },
+  emailFieldRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    gap: 9,
+  },
+  emailFieldGrow: {
+    flex: 1,
+    gap: 9,
+  },
+  secureToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 45,
+    minWidth: 105,
+    paddingHorizontal: 12,
+    borderWidth: 1,
+    borderRadius: 12,
+    gap: 7,
+  },
+  secureToggleText: {
+    fontFamily: 'Inter_600SemiBold',
+    fontSize: 12,
+  },
+  sendEmailButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 48,
+    marginTop: 3,
+    paddingHorizontal: 15,
     borderRadius: 14,
     gap: 8,
   },

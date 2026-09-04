@@ -5,9 +5,6 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
-export interface HealthStatus {
-  status: string;
-}
 
 export interface SmtpSettings {
   /**
@@ -34,28 +31,3 @@ export interface SmtpSettings {
   /** @maxLength 320 */
   fromEmail: string;
 }
-
-export interface SendEmailRequest {
-  smtp: SmtpSettings;
-  /**
-     * @minItems 1
-     * @maxItems 500
-     */
-  recipients: string[];
-  /**
-     * @minLength 1
-     * @maxLength 255
-     */
-  subject: string;
-  /**
-     * @minLength 1
-     * @maxLength 100000
-     */
-  body: string;
-}
-
-export interface EmailSendResult {
-  sent: number;
-  messageId: string;
-}
-
