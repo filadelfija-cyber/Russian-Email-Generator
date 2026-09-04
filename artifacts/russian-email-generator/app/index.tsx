@@ -60,6 +60,11 @@ const NAMES = [
 ] as const;
 
 const QUANTITY_OPTIONS = [5, 25, 100, 500] as const;
+const ALL_FORMATS: readonly Format[] = [
+  'surname-first',
+  'name-first',
+  'surname-number',
+];
 
 function randomItem<T>(items: readonly T[]) {
   return items[Math.floor(Math.random() * items.length)];
@@ -84,12 +89,48 @@ function createAddress(domain: string, format: Format): Address {
   };
 }
 
-function makeAddresses(domain: string, format: Format, count = 5) {
+function escapeRegex(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function compileFormatRegex(pattern: string, domain: string) {
+  if (!pattern.trim()) return { regex: null, error: null };
+
+  const expanded = pattern
+    .replace(/\{surname\}/gi, '[a-z]+')
+    .replace(/\{name\}/gi, '[a-z]+')
+    .replace(/\{number\}/gi, '\\d{1,3}')
+    .replace(/\{domain\}/gi, escapeRegex(domain));
+
+  try {
+    return { regex: new RegExp(expanded), error: null };
+  } catch {
+    return {
+      regex: null,
+      error: 'That regex is not valid. Check brackets, slashes, and parentheses.',
+    };
+  }
+}
+
+function makeAddresses(domain: string, pattern: string, count = 5) {
   const values: Address[] = [];
   const seen = new Set<string>();
+  const compiled = compileFormatRegex(pattern, domain);
+  let attempts = 0;
 
-  while (values.length < count) {
+  while (values.length < count && attempts < count * 100) {
+    const format = ALL_FORMATS[attempts % ALL_FORMATS.length];
     const next = createAddress(domain, format);
+    attempts += 1;
+
+    if (
+      compiled.regex &&
+      !compiled.regex.test(next.value) &&
+      !compiled.regex.test(next.value.split('@')[0])
+    ) {
+      continue;
+    }
+
     let value = next.value;
     let suffix = 1;
     while (seen.has(value)) {
@@ -108,34 +149,27 @@ export default function HomeScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const [domain, setDomain] = useState<string>('mail.ru');
-  const [format, setFormat] = useState<Format>('surname-first');
   const [quantity, setQuantity] = useState<number>(5);
   const [quantityInput, setQuantityInput] = useState<string>('5');
+  const [formatPattern, setFormatPattern] = useState<string>('');
   const [addresses, setAddresses] = useState<Address[]>(() =>
-    makeAddresses('mail.ru', 'surname-first'),
+    makeAddresses('mail.ru', ''),
   );
 
   const featured = addresses[0];
-  const formatLabel = useMemo(() => {
-    if (format === 'name-first') return 'Name + surname';
-    if (format === 'surname-number') return 'Surname + number';
-    return 'Surname + name';
-  }, [format]);
+  const regexState = useMemo(
+    () => compileFormatRegex(formatPattern, domain),
+    [formatPattern, domain],
+  );
 
   const regenerate = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    setAddresses(makeAddresses(domain, format, quantity));
+    setAddresses(makeAddresses(domain, formatPattern, quantity));
   };
 
   const updateDomain = (nextDomain: string) => {
     setDomain(nextDomain);
-    setAddresses(makeAddresses(nextDomain, format, quantity));
-    Haptics.selectionAsync();
-  };
-
-  const updateFormat = (nextFormat: Format) => {
-    setFormat(nextFormat);
-    setAddresses(makeAddresses(domain, nextFormat, quantity));
+    setAddresses(makeAddresses(nextDomain, formatPattern, quantity));
     Haptics.selectionAsync();
   };
 
@@ -143,13 +177,18 @@ export default function HomeScreen() {
     const safeQuantity = Math.min(500, Math.max(1, nextQuantity));
     setQuantity(safeQuantity);
     setQuantityInput(String(safeQuantity));
-    setAddresses(makeAddresses(domain, format, safeQuantity));
+    setAddresses(makeAddresses(domain, formatPattern, safeQuantity));
     Haptics.selectionAsync();
   };
 
   const applyTypedQuantity = () => {
     const parsed = Number.parseInt(quantityInput, 10);
     updateQuantity(Number.isNaN(parsed) ? 5 : parsed);
+  };
+
+  const applyFormatPattern = () => {
+    setAddresses(makeAddresses(domain, formatPattern, quantity));
+    Haptics.selectionAsync();
   };
 
   const copyText = async (value: string, message: string) => {
@@ -367,40 +406,48 @@ export default function HomeScreen() {
             </View>
 
             <Text style={[styles.sectionLabel, { color: colors.mutedForeground }]}>
-              NAME FORMAT
+              FORMAT REGEX
             </Text>
-            <View style={[styles.formatControl, { backgroundColor: colors.secondary }]}>
-              {([
-                ['surname-first', 'Surname + name'],
-                ['name-first', 'Name + surname'],
-                ['surname-number', 'Surname + number'],
-              ] as const).map(([value, label]) => {
-                const selected = format === value;
-                return (
-                  <Pressable
-                    key={value}
-                    testID={`format-${value}`}
-                    accessibilityRole="button"
-                    accessibilityState={{ selected }}
-                    onPress={() => updateFormat(value)}
-                    style={[
-                      styles.formatOption,
-                      selected && { backgroundColor: colors.card },
-                    ]}
-                  >
-                    <Text
-                      numberOfLines={1}
-                      style={[
-                        styles.formatText,
-                        { color: selected ? colors.foreground : colors.mutedForeground },
-                      ]}
-                    >
-                      {label}
-                    </Text>
-                  </Pressable>
-                );
-              })}
+            <View style={[styles.patternInputWrap, { backgroundColor: colors.secondary }]}>
+              <Feather name="code" size={16} color={colors.mutedForeground} />
+              <TextInput
+                testID="format-regex-input"
+                accessibilityLabel="Custom email format regular expression"
+                value={formatPattern}
+                onChangeText={setFormatPattern}
+                onSubmitEditing={applyFormatPattern}
+                placeholder="^{surname}\\.{name}@{domain}$"
+                placeholderTextColor={colors.mutedForeground}
+                autoCapitalize="none"
+                autoCorrect={false}
+                spellCheck={false}
+                returnKeyType="done"
+                style={[styles.patternInput, { color: colors.foreground }]}
+              />
+              {formatPattern ? (
+                <Pressable
+                  testID="clear-format-regex-button"
+                  accessibilityRole="button"
+                  accessibilityLabel="Clear custom format regex"
+                  onPress={() => {
+                    setFormatPattern('');
+                    setAddresses(makeAddresses(domain, '', quantity));
+                  }}
+                  style={styles.clearPatternButton}
+                >
+                  <Feather name="x" size={16} color={colors.mutedForeground} />
+                </Pressable>
+              ) : null}
             </View>
+            <Text
+              style={[
+                styles.patternHint,
+                { color: regexState.error ? colors.destructive : colors.mutedForeground },
+              ]}
+            >
+              {regexState.error ??
+                'Tokens: {surname}, {name}, {number}, {domain}. Leave blank to use all 3 formats.'}
+            </Text>
 
             <View style={styles.listHeading}>
               <View>
@@ -408,7 +455,8 @@ export default function HomeScreen() {
                   Fresh suggestions
                 </Text>
                 <Text style={[styles.listSubtitle, { color: colors.mutedForeground }]}>
-                  {formatLabel} · {domain}
+                  {formatPattern ? 'Regex filtered' : 'All 3 formats'} · {domain} ·{' '}
+                  {addresses.length} results
                 </Text>
               </View>
               <Pressable
@@ -675,6 +723,33 @@ const styles = StyleSheet.create({
   formatText: {
     fontFamily: 'Inter_500Medium',
     fontSize: 11,
+  },
+  patternInputWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    minHeight: 49,
+    paddingHorizontal: 13,
+    borderRadius: 14,
+    gap: 9,
+  },
+  patternInput: {
+    flex: 1,
+    minWidth: 0,
+    paddingVertical: 0,
+    fontFamily: 'Inter_500Medium',
+    fontSize: 12,
+  },
+  clearPatternButton: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: 28,
+    height: 32,
+  },
+  patternHint: {
+    marginTop: 8,
+    fontFamily: 'Inter_400Regular',
+    fontSize: 11,
+    lineHeight: 16,
   },
   listHeading: {
     flexDirection: 'row',
