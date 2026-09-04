@@ -15,7 +15,12 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useColors } from '@/hooks/useColors';
 
-type Format = 'surname-first' | 'name-first' | 'surname-number';
+type Format = {
+  id: string;
+  label: string;
+  template: string;
+  builtIn?: boolean;
+};
 
 type Address = {
   id: string;
@@ -23,7 +28,13 @@ type Address = {
   surname: string;
 };
 
-const DOMAINS = ['mail.ru', 'yandex.ru', 'gmail.com', 'inbox.ru'] as const;
+const DEFAULT_DOMAINS = ['mail.ru', 'yandex.ru', 'gmail.com', 'inbox.ru'] as const;
+
+const DEFAULT_FORMATS: Format[] = [
+  { id: 'surname-first', label: 'Surname + name', template: '{surname}.{name}', builtIn: true },
+  { id: 'name-first', label: 'Name + surname', template: '{name}.{surname}', builtIn: true },
+  { id: 'surname-number', label: 'Surname + number', template: '{surname}{number}', builtIn: true },
+];
 
 const SURNAMES = [
   { masculine: 'ivanov', feminine: 'ivanova' },
@@ -60,11 +71,6 @@ const NAMES = [
 ] as const;
 
 const QUANTITY_OPTIONS = [5, 25, 100, 500] as const;
-const ALL_FORMATS: readonly Format[] = [
-  'surname-first',
-  'name-first',
-  'surname-number',
-];
 
 function randomItem<T>(items: readonly T[]) {
   return items[Math.floor(Math.random() * items.length)];
@@ -75,16 +81,16 @@ function createAddress(domain: string, format: Format): Address {
   const feminine = Math.random() > 0.5;
   const surname = feminine ? surnamePair.feminine : surnamePair.masculine;
   const name = randomItem(NAMES);
-  const value =
-    format === 'name-first'
-      ? `${name}.${surname}@${domain}`
-      : format === 'surname-number'
-        ? `${surname}${Math.floor(10 + Math.random() * 90)}@${domain}`
-        : `${surname}.${name}@${domain}`;
+  const number = Math.floor(10 + Math.random() * 90);
+  const localPart = format.template
+    .replace(/\{surname\}/gi, surname)
+    .replace(/\{name\}/gi, name)
+    .replace(/\{number\}/gi, String(number))
+    .replace(/\{domain\}/gi, domain);
 
   return {
     id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-    value,
+    value: `${localPart}@${domain}`,
     surname,
   };
 }
@@ -112,14 +118,22 @@ function compileFormatRegex(pattern: string, domain: string) {
   }
 }
 
-function makeAddresses(domain: string, pattern: string, count = 5) {
+function makeAddresses(
+  domains: string[],
+  pattern: string,
+  formats: Format[],
+  count = 5,
+) {
   const values: Address[] = [];
   const seen = new Set<string>();
-  const compiled = compileFormatRegex(pattern, domain);
   let attempts = 0;
 
+  if (domains.length === 0 || formats.length === 0) return values;
+
   while (values.length < count && attempts < count * 100) {
-    const format = ALL_FORMATS[attempts % ALL_FORMATS.length];
+    const domain = domains[attempts % domains.length];
+    const format = formats[attempts % formats.length];
+    const compiled = compileFormatRegex(pattern, domain);
     const next = createAddress(domain, format);
     attempts += 1;
 
@@ -148,36 +162,145 @@ function makeAddresses(domain: string, pattern: string, count = 5) {
 export default function HomeScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const [domain, setDomain] = useState<string>('mail.ru');
+  const [domains, setDomains] = useState<string[]>([...DEFAULT_DOMAINS]);
+  const [selectedDomains, setSelectedDomains] = useState<string[]>(['mail.ru']);
+  const [formats, setFormats] = useState<Format[]>(DEFAULT_FORMATS);
+  const [selectedFormatIds, setSelectedFormatIds] = useState<string[]>(
+    DEFAULT_FORMATS.map((format) => format.id),
+  );
   const [quantity, setQuantity] = useState<number>(5);
   const [quantityInput, setQuantityInput] = useState<string>('5');
   const [formatPattern, setFormatPattern] = useState<string>('');
+  const [formatDraft, setFormatDraft] = useState<string>('');
+  const [domainDraft, setDomainDraft] = useState<string>('');
+  const [showAddFormat, setShowAddFormat] = useState<boolean>(false);
+  const [showAddDomain, setShowAddDomain] = useState<boolean>(false);
   const [addresses, setAddresses] = useState<Address[]>(() =>
-    makeAddresses('mail.ru', ''),
+    makeAddresses(['mail.ru'], '', DEFAULT_FORMATS),
   );
 
   const featured = addresses[0];
-  const regexState = useMemo(
-    () => compileFormatRegex(formatPattern, domain),
-    [formatPattern, domain],
+  const selectedFormats = useMemo(
+    () => formats.filter((format) => selectedFormatIds.includes(format.id)),
+    [formats, selectedFormatIds],
   );
+  const regexState = useMemo(
+    () => compileFormatRegex(formatPattern, selectedDomains[0] ?? 'domain.com'),
+    [formatPattern, selectedDomains],
+  );
+  const canGenerate = selectedDomains.length > 0 && selectedFormats.length > 0;
 
   const regenerate = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    setAddresses(makeAddresses(domain, formatPattern, quantity));
+    setAddresses(makeAddresses(selectedDomains, formatPattern, selectedFormats, quantity));
   };
 
-  const updateDomain = (nextDomain: string) => {
-    setDomain(nextDomain);
-    setAddresses(makeAddresses(nextDomain, formatPattern, quantity));
+  const toggleDomain = (nextDomain: string) => {
+    const nextSelected = selectedDomains.includes(nextDomain)
+      ? selectedDomains.filter((item) => item !== nextDomain)
+      : [...selectedDomains, nextDomain];
+    setSelectedDomains(nextSelected);
+    setAddresses(makeAddresses(nextSelected, formatPattern, selectedFormats, quantity));
     Haptics.selectionAsync();
+  };
+
+  const removeDomain = (domainToRemove: string) => {
+    const nextDomains = domains.filter((item) => item !== domainToRemove);
+    const nextSelected = selectedDomains.filter((item) => item !== domainToRemove);
+    setDomains(nextDomains);
+    setSelectedDomains(nextSelected);
+    setAddresses(makeAddresses(nextSelected, formatPattern, selectedFormats, quantity));
+  };
+
+  const addDomain = () => {
+    const nextDomain = domainDraft.trim().toLowerCase();
+    const validDomain =
+      /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/.test(
+        nextDomain,
+      );
+
+    if (!validDomain) {
+      Alert.alert('Check the domain', 'Enter a domain such as example.com.');
+      return;
+    }
+    if (domains.includes(nextDomain)) {
+      Alert.alert('Already added', `${nextDomain} is already in your domains.`);
+      return;
+    }
+
+    const nextDomains = [...domains, nextDomain];
+    const nextSelected = [...selectedDomains, nextDomain];
+    setDomains(nextDomains);
+    setSelectedDomains(nextSelected);
+    setDomainDraft('');
+    setShowAddDomain(false);
+    setAddresses(makeAddresses(nextSelected, formatPattern, selectedFormats, quantity));
+  };
+
+  const toggleFormat = (formatId: string) => {
+    const nextSelected = selectedFormatIds.includes(formatId)
+      ? selectedFormatIds.filter((id) => id !== formatId)
+      : [...selectedFormatIds, formatId];
+    setSelectedFormatIds(nextSelected);
+    const nextFormats = formats.filter((format) => nextSelected.includes(format.id));
+    setAddresses(makeAddresses(selectedDomains, formatPattern, nextFormats, quantity));
+    Haptics.selectionAsync();
+  };
+
+  const removeFormat = (formatId: string) => {
+    const nextFormats = formats.filter((format) => format.id !== formatId);
+    const nextSelectedIds = selectedFormatIds.filter((id) => id !== formatId);
+    const nextSelectedFormats = nextFormats.filter((format) =>
+      nextSelectedIds.includes(format.id),
+    );
+    setFormats(nextFormats);
+    setSelectedFormatIds(nextSelectedIds);
+    setAddresses(
+      makeAddresses(selectedDomains, formatPattern, nextSelectedFormats, quantity),
+    );
+  };
+
+  const addFormat = () => {
+    const template = formatDraft.trim().toLowerCase();
+    const validTemplate =
+      template.length > 0 &&
+      /^[a-z0-9._+{}-]+$/.test(template) &&
+      /\{(?:surname|name|number)\}/.test(template);
+
+    if (!validTemplate) {
+      Alert.alert(
+        'Check the format',
+        'Use letters, dots, dashes, and tokens like {surname}.{name}.',
+      );
+      return;
+    }
+
+    const newFormat: Format = {
+      id: `custom-${Date.now()}`,
+      label: `Custom · ${template}`,
+      template,
+    };
+    const nextFormats = [...formats, newFormat];
+    const nextSelectedIds = [...selectedFormatIds, newFormat.id];
+    setFormats(nextFormats);
+    setSelectedFormatIds(nextSelectedIds);
+    setFormatDraft('');
+    setShowAddFormat(false);
+    setAddresses(
+      makeAddresses(
+        selectedDomains,
+        formatPattern,
+        nextFormats.filter((format) => nextSelectedIds.includes(format.id)),
+        quantity,
+      ),
+    );
   };
 
   const updateQuantity = (nextQuantity: number) => {
     const safeQuantity = Math.min(500, Math.max(1, nextQuantity));
     setQuantity(safeQuantity);
     setQuantityInput(String(safeQuantity));
-    setAddresses(makeAddresses(domain, formatPattern, safeQuantity));
+    setAddresses(makeAddresses(selectedDomains, formatPattern, selectedFormats, safeQuantity));
     Haptics.selectionAsync();
   };
 
@@ -187,7 +310,7 @@ export default function HomeScreen() {
   };
 
   const applyFormatPattern = () => {
-    setAddresses(makeAddresses(domain, formatPattern, quantity));
+    setAddresses(makeAddresses(selectedDomains, formatPattern, selectedFormats, quantity));
     Haptics.selectionAsync();
   };
 
@@ -268,25 +391,30 @@ export default function HomeScreen() {
                 adjustsFontSizeToFit
                 style={[styles.featuredEmail, { color: colors.foreground }]}
               >
-                {featured.value}
+                {featured?.value ?? 'Select a format and domain'}
               </Text>
               <View style={styles.featureFooter}>
                 <View style={styles.pill}>
                   <View style={[styles.pillDot, { backgroundColor: colors.accent }]} />
                   <Text style={[styles.pillText, { color: colors.accent }]}>
-                    {featured.surname}
+                    {featured?.surname ?? 'No active selection'}
                   </Text>
                 </View>
                 <Pressable
                   testID="share-featured-button"
                   accessibilityRole="button"
-                  accessibilityLabel={`Copy ${featured.value}`}
+                  accessibilityLabel={`Copy ${featured?.value ?? 'generated address'}`}
+                  disabled={!featured}
                   onPress={() =>
+                    featured &&
                     copyText(featured.value, 'The generated address is ready to paste.')
                   }
                   style={({ pressed }) => [
                     styles.shareButton,
-                    { backgroundColor: colors.primary, opacity: pressed ? 0.75 : 1 },
+                    {
+                      backgroundColor: colors.primary,
+                      opacity: !featured ? 0.45 : pressed ? 0.75 : 1,
+                    },
                   ]}
                 >
                   <Feather name="copy" size={16} color={colors.primaryForeground} />
@@ -298,42 +426,220 @@ export default function HomeScreen() {
             </View>
 
             <Text style={[styles.sectionLabel, { color: colors.mutedForeground }]}>
-              CHOOSE A DOMAIN
+              DOMAINS TO USE
             </Text>
             <View style={styles.domainGrid}>
-              {DOMAINS.map((item) => {
-                const selected = item === domain;
+              {domains.map((item) => {
+                const selected = selectedDomains.includes(item);
                 return (
-                  <Pressable
-                    key={item}
-                    testID={`domain-${item}`}
-                    accessibilityRole="button"
-                    accessibilityState={{ selected }}
-                    onPress={() => updateDomain(item)}
-                    style={({ pressed }) => [
-                      styles.domainOption,
-                      {
-                        backgroundColor: selected ? colors.primary : colors.secondary,
-                        borderColor: selected ? colors.primary : colors.border,
-                        opacity: pressed ? 0.75 : 1,
-                      },
-                    ]}
-                  >
-                    <Text
-                      style={[
-                        styles.domainText,
-                        { color: selected ? colors.primaryForeground : colors.foreground },
+                  <View key={item} style={styles.managedOptionRow}>
+                    <Pressable
+                      testID={`domain-${item}`}
+                      accessibilityRole="checkbox"
+                      accessibilityState={{ checked: selected }}
+                      onPress={() => toggleDomain(item)}
+                      style={({ pressed }) => [
+                        styles.domainOption,
+                        {
+                          flex: 1,
+                          backgroundColor: selected ? colors.primary : colors.secondary,
+                          borderColor: selected ? colors.primary : colors.border,
+                          opacity: pressed ? 0.75 : 1,
+                        },
                       ]}
                     >
-                      {item}
-                    </Text>
-                    {selected ? (
-                      <Feather name="check" size={15} color={colors.primaryForeground} />
-                    ) : null}
-                  </Pressable>
+                      <View
+                        style={[
+                          styles.checkbox,
+                          {
+                            backgroundColor: selected ? colors.primaryForeground : 'transparent',
+                            borderColor: selected ? colors.primaryForeground : colors.border,
+                          },
+                        ]}
+                      >
+                        {selected ? (
+                          <Feather name="check" size={12} color={colors.primary} />
+                        ) : null}
+                      </View>
+                      <Text
+                        style={[
+                          styles.domainText,
+                          { color: selected ? colors.primaryForeground : colors.foreground },
+                        ]}
+                      >
+                        {item}
+                      </Text>
+                    </Pressable>
+                    <Pressable
+                      testID={`remove-domain-${item}`}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Remove ${item}`}
+                      onPress={() => removeDomain(item)}
+                      style={({ pressed }) => [
+                        styles.removeButton,
+                        { opacity: pressed ? 0.5 : 1 },
+                      ]}
+                    >
+                      <Feather name="trash-2" size={15} color={colors.mutedForeground} />
+                    </Pressable>
+                  </View>
                 );
               })}
             </View>
+            {showAddDomain ? (
+              <View style={styles.addRow}>
+                <TextInput
+                  testID="domain-input"
+                  accessibilityLabel="New email domain"
+                  value={domainDraft}
+                  onChangeText={setDomainDraft}
+                  onSubmitEditing={addDomain}
+                  placeholder="example.com"
+                  placeholderTextColor={colors.mutedForeground}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  keyboardType="url"
+                  style={[
+                    styles.addInput,
+                    { backgroundColor: colors.secondary, color: colors.foreground },
+                  ]}
+                />
+                <Pressable
+                  testID="confirm-add-domain-button"
+                  accessibilityRole="button"
+                  accessibilityLabel="Add domain"
+                  onPress={addDomain}
+                  style={({ pressed }) => [
+                    styles.smallActionButton,
+                    { backgroundColor: colors.accent, opacity: pressed ? 0.7 : 1 },
+                  ]}
+                >
+                  <Feather name="check" size={17} color={colors.accentForeground} />
+                </Pressable>
+              </View>
+            ) : null}
+            <Pressable
+              testID="add-domain-button"
+              accessibilityRole="button"
+              accessibilityLabel="Add a domain"
+              onPress={() => setShowAddDomain((visible) => !visible)}
+              style={({ pressed }) => [styles.addItemButton, { opacity: pressed ? 0.6 : 1 }]}
+            >
+              <Feather name="plus" size={15} color={colors.accent} />
+              <Text style={[styles.addItemText, { color: colors.accent }]}>
+                {showAddDomain ? 'Close domain editor' : 'Add domain'}
+              </Text>
+            </Pressable>
+
+            <Text style={[styles.sectionLabel, { color: colors.mutedForeground }]}>
+              FORMATS TO USE
+            </Text>
+            <View style={styles.formatList}>
+              {formats.map((format) => {
+                const selected = selectedFormatIds.includes(format.id);
+                return (
+                  <View key={format.id} style={styles.managedOptionRow}>
+                    <Pressable
+                      testID={`format-${format.id}`}
+                      accessibilityRole="checkbox"
+                      accessibilityState={{ checked: selected }}
+                      onPress={() => toggleFormat(format.id)}
+                      style={({ pressed }) => [
+                        styles.formatOptionRow,
+                        {
+                          backgroundColor: selected ? colors.card : colors.secondary,
+                          borderColor: selected ? colors.accent : colors.border,
+                          opacity: pressed ? 0.75 : 1,
+                        },
+                      ]}
+                    >
+                      <View
+                        style={[
+                          styles.checkbox,
+                          {
+                            backgroundColor: selected ? colors.accent : 'transparent',
+                            borderColor: selected ? colors.accent : colors.border,
+                          },
+                        ]}
+                      >
+                        {selected ? (
+                          <Feather name="check" size={12} color={colors.accentForeground} />
+                        ) : null}
+                      </View>
+                      <View style={styles.formatCopy}>
+                        <Text style={[styles.formatName, { color: colors.foreground }]}>
+                          {format.label}
+                        </Text>
+                        <Text style={[styles.formatTemplate, { color: colors.mutedForeground }]}>
+                          {format.template}@domain
+                        </Text>
+                      </View>
+                    </Pressable>
+                    <Pressable
+                      testID={`remove-format-${format.id}`}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Remove ${format.label}`}
+                      onPress={() => removeFormat(format.id)}
+                      style={({ pressed }) => [
+                        styles.removeButton,
+                        { opacity: pressed ? 0.5 : 1 },
+                      ]}
+                    >
+                      <Feather name="trash-2" size={15} color={colors.mutedForeground} />
+                    </Pressable>
+                  </View>
+                );
+              })}
+            </View>
+            {showAddFormat ? (
+              <View style={styles.addFormatPanel}>
+                <TextInput
+                  testID="format-template-input"
+                  accessibilityLabel="New email format template"
+                  value={formatDraft}
+                  onChangeText={setFormatDraft}
+                  onSubmitEditing={addFormat}
+                  placeholder="{surname}.{name}"
+                  placeholderTextColor={colors.mutedForeground}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  style={[
+                    styles.addInput,
+                    { backgroundColor: colors.secondary, color: colors.foreground },
+                  ]}
+                />
+                <Text style={[styles.addHelp, { color: colors.mutedForeground }]}>
+                  Use {'{surname}'}, {'{name}'}, or {'{number}'}. Domains are managed above.
+                </Text>
+                <Pressable
+                  testID="confirm-add-format-button"
+                  accessibilityRole="button"
+                  accessibilityLabel="Add format"
+                  onPress={addFormat}
+                  style={({ pressed }) => [
+                    styles.addConfirmButton,
+                    { backgroundColor: colors.accent, opacity: pressed ? 0.7 : 1 },
+                  ]}
+                >
+                  <Feather name="plus" size={15} color={colors.accentForeground} />
+                  <Text style={[styles.generateButtonText, { color: colors.accentForeground }]}>
+                    Add format
+                  </Text>
+                </Pressable>
+              </View>
+            ) : null}
+            <Pressable
+              testID="add-format-button"
+              accessibilityRole="button"
+              accessibilityLabel="Add a format"
+              onPress={() => setShowAddFormat((visible) => !visible)}
+              style={({ pressed }) => [styles.addItemButton, { opacity: pressed ? 0.6 : 1 }]}
+            >
+              <Feather name="plus" size={15} color={colors.accent} />
+              <Text style={[styles.addItemText, { color: colors.accent }]}>
+                {showAddFormat ? 'Close format editor' : 'Add format'}
+              </Text>
+            </Pressable>
 
             <Text style={[styles.sectionLabel, { color: colors.mutedForeground }]}>
               LIST SIZE
@@ -361,9 +667,13 @@ export default function HomeScreen() {
                 accessibilityRole="button"
                 accessibilityLabel={`Generate ${quantityInput || 5} addresses`}
                 onPress={applyTypedQuantity}
+                disabled={!canGenerate}
                 style={({ pressed }) => [
                   styles.generateButton,
-                  { backgroundColor: colors.accent, opacity: pressed ? 0.75 : 1 },
+                  {
+                    backgroundColor: colors.accent,
+                    opacity: !canGenerate ? 0.45 : pressed ? 0.75 : 1,
+                  },
                 ]}
               >
                 <Feather name="zap" size={16} color={colors.accentForeground} />
@@ -431,7 +741,9 @@ export default function HomeScreen() {
                   accessibilityLabel="Clear custom format regex"
                   onPress={() => {
                     setFormatPattern('');
-                    setAddresses(makeAddresses(domain, '', quantity));
+                    setAddresses(
+                      makeAddresses(selectedDomains, '', selectedFormats, quantity),
+                    );
                   }}
                   style={styles.clearPatternButton}
                 >
@@ -446,7 +758,7 @@ export default function HomeScreen() {
               ]}
             >
               {regexState.error ??
-                'Tokens: {surname}, {name}, {number}, {domain}. Leave blank to use all 3 formats.'}
+                'Tokens: {surname}, {name}, {number}, {domain}. Leave blank to use checked formats.'}
             </Text>
 
             <View style={styles.listHeading}>
@@ -455,7 +767,8 @@ export default function HomeScreen() {
                   Fresh suggestions
                 </Text>
                 <Text style={[styles.listSubtitle, { color: colors.mutedForeground }]}>
-                  {formatPattern ? 'Regex filtered' : 'All 3 formats'} · {domain} ·{' '}
+                  {formatPattern ? 'Regex filtered' : 'Checked formats'} ·{' '}
+                  {selectedDomains.length} domain{selectedDomains.length === 1 ? '' : 's'} ·{' '}
                   {addresses.length} results
                 </Text>
               </View>
@@ -705,6 +1018,105 @@ const styles = StyleSheet.create({
   domainText: {
     fontFamily: 'Inter_600SemiBold',
     fontSize: 13,
+  },
+  managedOptionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    width: '100%',
+    gap: 5,
+  },
+  checkbox: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: 18,
+    height: 18,
+    borderWidth: 1,
+    borderRadius: 5,
+  },
+  removeButton: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: 34,
+    height: 44,
+  },
+  addItemButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    marginTop: 9,
+    paddingVertical: 5,
+    gap: 6,
+  },
+  addItemText: {
+    fontFamily: 'Inter_600SemiBold',
+    fontSize: 12,
+  },
+  addRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 9,
+    gap: 8,
+  },
+  addInput: {
+    flex: 1,
+    minHeight: 45,
+    paddingHorizontal: 13,
+    paddingVertical: 0,
+    borderRadius: 13,
+    fontFamily: 'Inter_500Medium',
+    fontSize: 13,
+  },
+  smallActionButton: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: 45,
+    height: 45,
+    borderRadius: 13,
+  },
+  formatList: {
+    gap: 8,
+  },
+  formatOptionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+    minHeight: 52,
+    paddingHorizontal: 13,
+    borderWidth: 1,
+    borderRadius: 14,
+  },
+  formatCopy: {
+    flex: 1,
+    marginLeft: 10,
+  },
+  formatName: {
+    fontFamily: 'Inter_600SemiBold',
+    fontSize: 12,
+  },
+  formatTemplate: {
+    marginTop: 3,
+    fontFamily: 'Inter_400Regular',
+    fontSize: 10,
+  },
+  addFormatPanel: {
+    marginTop: 9,
+    padding: 11,
+    borderRadius: 14,
+    gap: 8,
+  },
+  addHelp: {
+    fontFamily: 'Inter_400Regular',
+    fontSize: 10,
+    lineHeight: 15,
+  },
+  addConfirmButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    minHeight: 38,
+    paddingHorizontal: 13,
+    borderRadius: 11,
+    gap: 6,
   },
   formatControl: {
     flexDirection: 'row',
