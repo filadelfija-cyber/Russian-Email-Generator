@@ -1,4 +1,5 @@
 import { Feather } from '@expo/vector-icons';
+import * as Clipboard from 'expo-clipboard';
 import * as Haptics from 'expo-haptics';
 import { StatusBar } from 'expo-status-bar';
 import React, { useMemo, useState } from 'react';
@@ -6,9 +7,9 @@ import {
   Alert,
   FlatList,
   Pressable,
-  Share,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -25,22 +26,22 @@ type Address = {
 const DOMAINS = ['mail.ru', 'yandex.ru', 'gmail.com', 'inbox.ru'] as const;
 
 const SURNAMES = [
-  'ivanov',
-  'smirnov',
-  'kuznecov',
-  'popov',
-  'sokolov',
-  'petrov',
-  'volkov',
-  'morozov',
-  'novikov',
-  'fedorov',
-  'mikhailov',
-  'orlov',
-  'nikitin',
-  'pavlov',
-  'kozlov',
-  'lebedev',
+  { masculine: 'ivanov', feminine: 'ivanova' },
+  { masculine: 'smirnov', feminine: 'smirnova' },
+  { masculine: 'kuznecov', feminine: 'kuznecova' },
+  { masculine: 'popov', feminine: 'popova' },
+  { masculine: 'sokolov', feminine: 'sokolova' },
+  { masculine: 'petrov', feminine: 'petrova' },
+  { masculine: 'volkov', feminine: 'volkova' },
+  { masculine: 'morozov', feminine: 'morozova' },
+  { masculine: 'novikov', feminine: 'novikova' },
+  { masculine: 'fedorov', feminine: 'fedorova' },
+  { masculine: 'mikhailov', feminine: 'mikhailova' },
+  { masculine: 'orlov', feminine: 'orlova' },
+  { masculine: 'nikitin', feminine: 'nikitina' },
+  { masculine: 'pavlov', feminine: 'pavlova' },
+  { masculine: 'kozlov', feminine: 'kozlova' },
+  { masculine: 'lebedev', feminine: 'lebedeva' },
 ] as const;
 
 const NAMES = [
@@ -58,12 +59,16 @@ const NAMES = [
   'katya',
 ] as const;
 
+const QUANTITY_OPTIONS = [5, 25, 100, 500] as const;
+
 function randomItem<T>(items: readonly T[]) {
   return items[Math.floor(Math.random() * items.length)];
 }
 
 function createAddress(domain: string, format: Format): Address {
-  const surname = randomItem(SURNAMES);
+  const surnamePair = randomItem(SURNAMES);
+  const feminine = Math.random() > 0.5;
+  const surname = feminine ? surnamePair.feminine : surnamePair.masculine;
   const name = randomItem(NAMES);
   const value =
     format === 'name-first'
@@ -85,10 +90,15 @@ function makeAddresses(domain: string, format: Format, count = 5) {
 
   while (values.length < count) {
     const next = createAddress(domain, format);
-    if (!seen.has(next.value)) {
-      seen.add(next.value);
-      values.push(next);
+    let value = next.value;
+    let suffix = 1;
+    while (seen.has(value)) {
+      const [localPart, addressDomain] = next.value.split('@');
+      value = `${localPart}.${suffix}@${addressDomain}`;
+      suffix += 1;
     }
+    seen.add(value);
+    values.push({ ...next, value });
   }
 
   return values;
@@ -99,6 +109,8 @@ export default function HomeScreen() {
   const insets = useSafeAreaInsets();
   const [domain, setDomain] = useState<string>('mail.ru');
   const [format, setFormat] = useState<Format>('surname-first');
+  const [quantity, setQuantity] = useState<number>(5);
+  const [quantityInput, setQuantityInput] = useState<string>('5');
   const [addresses, setAddresses] = useState<Address[]>(() =>
     makeAddresses('mail.ru', 'surname-first'),
   );
@@ -112,33 +124,44 @@ export default function HomeScreen() {
 
   const regenerate = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    setAddresses(makeAddresses(domain, format));
+    setAddresses(makeAddresses(domain, format, quantity));
   };
 
   const updateDomain = (nextDomain: string) => {
     setDomain(nextDomain);
-    setAddresses(makeAddresses(nextDomain, format));
+    setAddresses(makeAddresses(nextDomain, format, quantity));
     Haptics.selectionAsync();
   };
 
   const updateFormat = (nextFormat: Format) => {
     setFormat(nextFormat);
-    setAddresses(makeAddresses(domain, nextFormat));
+    setAddresses(makeAddresses(domain, nextFormat, quantity));
     Haptics.selectionAsync();
   };
 
-  const shareAddress = async (value: string) => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    await Share.share({
-      message: value,
-      title: 'Generated email address',
-    });
+  const updateQuantity = (nextQuantity: number) => {
+    const safeQuantity = Math.min(500, Math.max(1, nextQuantity));
+    setQuantity(safeQuantity);
+    setQuantityInput(String(safeQuantity));
+    setAddresses(makeAddresses(domain, format, safeQuantity));
+    Haptics.selectionAsync();
   };
 
-  const copyHint = () => {
-    Alert.alert(
-      'Generated example',
-      'This is an example address. Use the share action to copy it to another app.',
+  const applyTypedQuantity = () => {
+    const parsed = Number.parseInt(quantityInput, 10);
+    updateQuantity(Number.isNaN(parsed) ? 5 : parsed);
+  };
+
+  const copyText = async (value: string, message: string) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    await Clipboard.setStringAsync(value);
+    Alert.alert('Copied', message);
+  };
+
+  const copyList = async () => {
+    await copyText(
+      addresses.map((address) => address.value).join('\n'),
+      `${addresses.length} generated addresses are ready to paste.`,
     );
   };
 
@@ -218,17 +241,18 @@ export default function HomeScreen() {
                 <Pressable
                   testID="share-featured-button"
                   accessibilityRole="button"
-                  accessibilityLabel={`Share ${featured.value}`}
-                  onPress={() => shareAddress(featured.value)}
-                  onLongPress={copyHint}
+                  accessibilityLabel={`Copy ${featured.value}`}
+                  onPress={() =>
+                    copyText(featured.value, 'The generated address is ready to paste.')
+                  }
                   style={({ pressed }) => [
                     styles.shareButton,
                     { backgroundColor: colors.primary, opacity: pressed ? 0.75 : 1 },
                   ]}
                 >
-                  <Feather name="share-2" size={16} color={colors.primaryForeground} />
+                  <Feather name="copy" size={16} color={colors.primaryForeground} />
                   <Text style={[styles.shareText, { color: colors.primaryForeground }]}>
-                    Share
+                    Copy
                   </Text>
                 </Pressable>
               </View>
@@ -270,6 +294,76 @@ export default function HomeScreen() {
                   </Pressable>
                 );
               })}
+            </View>
+
+            <Text style={[styles.sectionLabel, { color: colors.mutedForeground }]}>
+              LIST SIZE
+            </Text>
+            <View style={styles.quantityRow}>
+              <View style={[styles.quantityInputWrap, { backgroundColor: colors.secondary }]}>
+                <TextInput
+                  testID="quantity-input"
+                  accessibilityLabel="Number of email addresses"
+                  value={quantityInput}
+                  onChangeText={(value) => setQuantityInput(value.replace(/[^0-9]/g, ''))}
+                  onBlur={applyTypedQuantity}
+                  onSubmitEditing={applyTypedQuantity}
+                  keyboardType="number-pad"
+                  maxLength={3}
+                  selectTextOnFocus
+                  style={[styles.quantityInput, { color: colors.foreground }]}
+                />
+                <Text style={[styles.quantityHint, { color: colors.mutedForeground }]}>
+                  of 500
+                </Text>
+              </View>
+              <Pressable
+                testID="generate-list-button"
+                accessibilityRole="button"
+                accessibilityLabel={`Generate ${quantityInput || 5} addresses`}
+                onPress={applyTypedQuantity}
+                style={({ pressed }) => [
+                  styles.generateButton,
+                  { backgroundColor: colors.accent, opacity: pressed ? 0.75 : 1 },
+                ]}
+              >
+                <Feather name="zap" size={16} color={colors.accentForeground} />
+                <Text style={[styles.generateButtonText, { color: colors.accentForeground }]}>
+                  Generate
+                </Text>
+              </Pressable>
+            </View>
+            <View style={styles.quantityOptions}>
+              {QUANTITY_OPTIONS.map((option) => (
+                <Pressable
+                  key={option}
+                  testID={`quantity-${option}`}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: quantity === option }}
+                  onPress={() => updateQuantity(option)}
+                  style={({ pressed }) => [
+                    styles.quantityOption,
+                    {
+                      backgroundColor:
+                        quantity === option ? colors.card : colors.secondary,
+                      borderColor: quantity === option ? colors.accent : colors.border,
+                      opacity: pressed ? 0.7 : 1,
+                    },
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.quantityOptionText,
+                      {
+                        color:
+                          quantity === option ? colors.accent : colors.mutedForeground,
+                      },
+                    ]}
+                  >
+                    {option}
+                  </Text>
+                </Pressable>
+              ))}
             </View>
 
             <Text style={[styles.sectionLabel, { color: colors.mutedForeground }]}>
@@ -317,7 +411,19 @@ export default function HomeScreen() {
                   {formatLabel} · {domain}
                 </Text>
               </View>
-              <Text style={[styles.count, { color: colors.accent }]}>05</Text>
+              <Pressable
+                testID="copy-list-button"
+                accessibilityRole="button"
+                accessibilityLabel={`Copy all ${addresses.length} generated addresses`}
+                onPress={copyList}
+                style={({ pressed }) => [
+                  styles.copyListButton,
+                  { backgroundColor: colors.secondary, opacity: pressed ? 0.7 : 1 },
+                ]}
+              >
+                <Feather name="copy" size={14} color={colors.accent} />
+                <Text style={[styles.copyListText, { color: colors.accent }]}>Copy all</Text>
+              </Pressable>
             </View>
           </View>
         }
@@ -329,6 +435,7 @@ export default function HomeScreen() {
               </Text>
             </View>
             <Text
+              selectable
               numberOfLines={1}
               style={[styles.addressText, { color: colors.foreground }]}
             >
@@ -337,17 +444,19 @@ export default function HomeScreen() {
             <Pressable
               testID={`share-address-${index}`}
               accessibilityRole="button"
-              accessibilityLabel={`Share ${item.value}`}
-              onPress={() => shareAddress(item.value)}
+              accessibilityLabel={`Copy ${item.value}`}
+              onPress={() =>
+                copyText(item.value, 'The generated address is ready to paste.')
+              }
               style={({ pressed }) => [styles.rowAction, { opacity: pressed ? 0.5 : 1 }]}
             >
-              <Feather name="arrow-up-right" size={18} color={colors.mutedForeground} />
+              <Feather name="copy" size={17} color={colors.mutedForeground} />
             </Pressable>
           </View>
         )}
         ListFooterComponent={
           <Text style={[styles.disclaimer, { color: colors.mutedForeground }]}>
-            Generated locally on your device. These are examples, not active inboxes.
+            Generated locally on your device. These are examples, not active inboxes. Long-press an address to select it.
           </Text>
         }
       />
@@ -467,6 +576,61 @@ const styles = StyleSheet.create({
     fontFamily: 'Inter_600SemiBold',
     fontSize: 12,
   },
+  quantityRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 9,
+  },
+  quantityInputWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+    minHeight: 48,
+    paddingHorizontal: 14,
+    borderRadius: 14,
+  },
+  quantityInput: {
+    minWidth: 32,
+    paddingVertical: 0,
+    fontFamily: 'Inter_700Bold',
+    fontSize: 18,
+  },
+  quantityHint: {
+    marginLeft: 7,
+    fontFamily: 'Inter_400Regular',
+    fontSize: 12,
+  },
+  generateButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 48,
+    paddingHorizontal: 15,
+    borderRadius: 14,
+    gap: 7,
+  },
+  generateButtonText: {
+    fontFamily: 'Inter_700Bold',
+    fontSize: 12,
+  },
+  quantityOptions: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 9,
+  },
+  quantityOption: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    minWidth: 47,
+    minHeight: 34,
+    paddingHorizontal: 10,
+    borderWidth: 1,
+    borderRadius: 11,
+  },
+  quantityOptionText: {
+    fontFamily: 'Inter_600SemiBold',
+    fontSize: 11,
+  },
   sectionLabel: {
     marginTop: 28,
     marginBottom: 11,
@@ -532,6 +696,18 @@ const styles = StyleSheet.create({
   count: {
     fontFamily: 'Inter_700Bold',
     fontSize: 20,
+  },
+  copyListButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 11,
+    paddingVertical: 8,
+    borderRadius: 10,
+    gap: 6,
+  },
+  copyListText: {
+    fontFamily: 'Inter_600SemiBold',
+    fontSize: 11,
   },
   addressRow: {
     flexDirection: 'row',
