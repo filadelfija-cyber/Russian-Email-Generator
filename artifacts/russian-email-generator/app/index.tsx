@@ -53,48 +53,95 @@ const DEFAULT_FORMATS: Format[] = [
   { id: 'surname-number', label: 'Surname + number', template: '{surname}{number}', builtIn: true },
 ];
 
-const DEFAULT_SURNAMES: SurnamePair[] = [
-  { id: 'ivanov-ivanova', masculine: 'ivanov', feminine: 'ivanova' },
-  { id: 'smirnov-smirnova', masculine: 'smirnov', feminine: 'smirnova' },
-  { id: 'kuznecov-kuznecova', masculine: 'kuznecov', feminine: 'kuznecova' },
-  { id: 'popov-popova', masculine: 'popov', feminine: 'popova' },
-  { id: 'sokolov-sokolova', masculine: 'sokolov', feminine: 'sokolova' },
-  { id: 'petrov-petrova', masculine: 'petrov', feminine: 'petrova' },
-  { id: 'volkov-volkova', masculine: 'volkov', feminine: 'volkova' },
-  { id: 'morozov-morozova', masculine: 'morozov', feminine: 'morozova' },
-  { id: 'novikov-novikova', masculine: 'novikov', feminine: 'novikova' },
-  { id: 'fedorov-fedorova', masculine: 'fedorov', feminine: 'fedorova' },
-  { id: 'mikhailov-mikhailova', masculine: 'mikhailov', feminine: 'mikhailova' },
-  { id: 'orlov-orlova', masculine: 'orlov', feminine: 'orlova' },
-  { id: 'nikitin-nikitina', masculine: 'nikitin', feminine: 'nikitina' },
-  { id: 'pavlov-pavlova', masculine: 'pavlov', feminine: 'pavlova' },
-  { id: 'kozlov-kozlova', masculine: 'kozlov', feminine: 'kozlova' },
-  { id: 'lebedev-lebedeva', masculine: 'lebedev', feminine: 'lebedeva' },
-];
+const DEFAULT_SURNAME_MASCULINE = Array.from(new Set(`
+ivanov smirnov kuznetsov popov sokolov petrov volkov morozov novikov fedorov
+mikhailov orlov nikitin pavlov kozlov lebedev semenov egorov makarov andreev
+nikolaev alekseev antonov danilov romanov vasilev zakharchenko zaitsev solovyov
+vasiliev medvedev belov komarov kuzmin vinogradov bogdanov vorobyov frolov
+efremov isakov korolev gusev kisselev ilyin maks imov kolesnikov titov
+matveev trofimov markov mironov krylov kulikov kudryavtsev baranov zhukov
+tarasov savelyev sobolev panov dorofeev konovalov korotkov kulakov belyaev
+shestakov ponomarev ermakov nikiforov anisimov davydov melnikov golubev
+chistyakov kovalev bykov suslov kazakov simonov kondratyev zhuravlev
+filippov makarov kalinin sidorov antonov gladkov osipov martynov bobrov
+gromov demidov drozdov eremin nosov rybakov suvorov tikhonov maslov
+prokhorov kozhevnikov lukyanov baranov shevtsov kornilov kondrashov lavrov
+fedotov zimin yarov shubin yashin karpov astakhov evdokimov samsonov
+bogatyrev galaktionov artemov rodionov vladimirov gerasimov zakharov
+grigoriev makarov streltsov ignatyev mironov nazarov savin safonov
+ustinov makarov chernov belousov kalachyov panfilov martynov rudenko
+kruglov ershov khokhlov golovin blagov voloshin kudryashov
+abramov agafonov akimov burtsev valerianov vinnikov vlasov grachev
+gorbunov gorshkov denisov drobyshev zadorozhny kalmykov
+kapustin kiryanov klimov klimentyev kononov kopylov kostenko
+lapin litvinov lobanov loginov makarov malyshev maltsev
+nechaev panchenko plotnikov ryazantsev ryabov serov starikov
+tokarev tsvetkov cherepanov shcherbakov shcherbak shilov
+yakovlev yudin yusupov abashkin abramkin avdeev avgustinov babushkin
+baksheev barabanov bezrukov berezin bobylev bortsov bryzgalov burkov
+bystrov chagin chaykin chebotarev chemodanov cherkasov chernyshov
+davletov demchenko deryabin dolmatov dubinin dumachev dyakonov elizarov
+fedoseev fomin frantsev galkin glazov gubanov grishin grishko gusakov
+ignatov inozemtsev kalashnikov kamyshin karasev karelin kashin kharlamov
+khmelev khromov kirillov kolesov koshkin kravtsov krivenko logvinenko
+malinin moiseev mukhin muratov musatov nesterov nikishin novozhilov
+pavlenko pereverzev petukhov polikarpov potapov privalov rubtsov ryzhov
+salnikov sarkisov shapovalov shashkov shevchenko shishkin shmelev
+sidorenko stepanov subbotin tumanov ushanov
+`.replace(/[^a-z\s]/gi, '').trim().split(/\s+/)));
+
+function toFeminineSurname(surname: string) {
+  if (surname.endsWith('sky')) return `${surname.slice(0, -1)}aya`;
+  if (surname.endsWith('iy')) return `${surname.slice(0, -2)}aya`;
+  if (surname.endsWith('ko') || surname.endsWith('uk')) return surname;
+  return `${surname}a`;
+}
+
+const DEFAULT_SURNAMES: SurnamePair[] = DEFAULT_SURNAME_MASCULINE.map((masculine) => {
+  const feminine = toFeminineSurname(masculine);
+  return { id: `${masculine}-${feminine}`, masculine, feminine };
+});
 
 const DEFAULT_NAMES: NamePool = {
-  masculine: [
-    'alexey',
-    'dmitry',
-    'nikita',
-    'maxim',
-    'sergey',
-    'artem',
-    'ivan',
-    'andrey',
-    'mikhail',
-  ],
-  feminine: [
-    'anna',
-    'elena',
-    'marina',
-    'irina',
-    'olga',
-    'katya',
-    'maria',
-    'svetlana',
-    'natalia',
-  ],
+  masculine: `
+    alexey dmitry nikita maxim sergey artem ivan andrey mikhail aleksandr vladimir
+    evgeny daniil kirill roman ilya pavel anton denis oleg victor konstantin
+    nikolay vasily yuri georgy grigory stanislav vyacheslav ruslan timofey fedor
+    lev matvey mark artemy yaroslav gleb boris vadim igor valery vitaly leonid
+    gennady semyon yegor stepan zakhar savva nikolay miron danil dmitriy aleksei
+    vladislav rostislav radomir robert rafael renat rinald askold albert adam
+    arkady arseny valerian veniamin vladlen german demyan ermolai innokenty
+    kornel lavr makar maksimilian marat moisei naum nicephor nikodim nikon
+    omelyan plat on prokofy rodion samuil spartak tikhon trofim yaropolk
+    yaromir yermolai yulian yuri yustin avdey avvakum agap akim almaz anisim
+    apollon arest arsen borislav bronislav vadim vadim vadim vasiliev vsevolod
+    vyacheslav davyd david daniyar demid dorofey emelyan epifan foma hariton
+    ignat ildar ilmir iliodor innokenty isaak karim kasimir klim klyment
+    kuzma lazar lukyan makar martyn modest nazar nikifor panteley parfen
+    patrick piotr savely serafim sidor stanislav terenty timur yan yanis
+  `.replace(/[^a-z\s]/gi, '').trim().split(/\s+/),
+  feminine: `
+    anna elena marina irina olga katya maria svetlana natalia aleksandra
+    ekaterina tatiana vera galina lyudmila nadezhda valentina tamara
+    ljubov nina raisa zinaida larisa lydia tsvetana darya daria polina
+    sofia sonya anastasia anjelika kristina karina alina arina vasilisa
+    varvara veronika viktoria vitalina valeria yulia yuliya oksana
+    ksenia kseniya elizaveta elizabeth margarita svetlana nadejda
+    milana milena mira miroslava nadia nika nelli nonna olesya
+    oksana olena olga pelageya regina rita rimma rufina ruslana
+    sabina sabrina samira selena serafima snezhana stella susanna
+    tayana taya teona uliyana ulyana ursula faina feodora felicia
+    frida yasmina yaroslava yarina yana yana agata agnessa agnia
+    anastasiya anfiya anisa anisia antonina apollinaria ariadna
+    bella bogdana bronislava vladislava vladlena vlada venera
+    diana dina dominika evdokiya efrosinya elvira emma esenia
+    evgenia evgeniya galya ganna glafira dina irena ivanna
+    kira klara klavdia larisa liliya lilya lola lolita
+    magdalena maya melania melissa nadine nargiz natasha nelli
+    nikolina nikolya olimpiada olya pamela paraskeva patricia
+    roza rosalina rufina sofya stefaniya taisia taisiya taya
+    ulyana felicia florentina haritina charlotte evelina
+  `.replace(/[^a-z\s]/gi, '').trim().split(/\s+/),
 };
 
 const QUANTITY_OPTIONS = [5, 25, 100, 500] as const;
