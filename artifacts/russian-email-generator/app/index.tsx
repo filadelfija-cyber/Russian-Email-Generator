@@ -32,6 +32,19 @@ type Address = {
   surname: string;
 };
 
+type Gender = 'masculine' | 'feminine';
+
+type SurnamePair = {
+  id: string;
+  masculine: string;
+  feminine: string;
+};
+
+type NamePool = {
+  masculine: string[];
+  feminine: string[];
+};
+
 const DEFAULT_DOMAINS = ['mail.ru', 'yandex.ru', 'gmail.com', 'inbox.ru'] as const;
 
 const DEFAULT_FORMATS: Format[] = [
@@ -40,26 +53,26 @@ const DEFAULT_FORMATS: Format[] = [
   { id: 'surname-number', label: 'Surname + number', template: '{surname}{number}', builtIn: true },
 ];
 
-const SURNAMES = [
-  { masculine: 'ivanov', feminine: 'ivanova' },
-  { masculine: 'smirnov', feminine: 'smirnova' },
-  { masculine: 'kuznecov', feminine: 'kuznecova' },
-  { masculine: 'popov', feminine: 'popova' },
-  { masculine: 'sokolov', feminine: 'sokolova' },
-  { masculine: 'petrov', feminine: 'petrova' },
-  { masculine: 'volkov', feminine: 'volkova' },
-  { masculine: 'morozov', feminine: 'morozova' },
-  { masculine: 'novikov', feminine: 'novikova' },
-  { masculine: 'fedorov', feminine: 'fedorova' },
-  { masculine: 'mikhailov', feminine: 'mikhailova' },
-  { masculine: 'orlov', feminine: 'orlova' },
-  { masculine: 'nikitin', feminine: 'nikitina' },
-  { masculine: 'pavlov', feminine: 'pavlova' },
-  { masculine: 'kozlov', feminine: 'kozlova' },
-  { masculine: 'lebedev', feminine: 'lebedeva' },
-] as const;
+const DEFAULT_SURNAMES: SurnamePair[] = [
+  { id: 'ivanov-ivanova', masculine: 'ivanov', feminine: 'ivanova' },
+  { id: 'smirnov-smirnova', masculine: 'smirnov', feminine: 'smirnova' },
+  { id: 'kuznecov-kuznecova', masculine: 'kuznecov', feminine: 'kuznecova' },
+  { id: 'popov-popova', masculine: 'popov', feminine: 'popova' },
+  { id: 'sokolov-sokolova', masculine: 'sokolov', feminine: 'sokolova' },
+  { id: 'petrov-petrova', masculine: 'petrov', feminine: 'petrova' },
+  { id: 'volkov-volkova', masculine: 'volkov', feminine: 'volkova' },
+  { id: 'morozov-morozova', masculine: 'morozov', feminine: 'morozova' },
+  { id: 'novikov-novikova', masculine: 'novikov', feminine: 'novikova' },
+  { id: 'fedorov-fedorova', masculine: 'fedorov', feminine: 'fedorova' },
+  { id: 'mikhailov-mikhailova', masculine: 'mikhailov', feminine: 'mikhailova' },
+  { id: 'orlov-orlova', masculine: 'orlov', feminine: 'orlova' },
+  { id: 'nikitin-nikitina', masculine: 'nikitin', feminine: 'nikitina' },
+  { id: 'pavlov-pavlova', masculine: 'pavlov', feminine: 'pavlova' },
+  { id: 'kozlov-kozlova', masculine: 'kozlov', feminine: 'kozlova' },
+  { id: 'lebedev-lebedeva', masculine: 'lebedev', feminine: 'lebedeva' },
+];
 
-const NAMES = {
+const DEFAULT_NAMES: NamePool = {
   masculine: [
     'alexey',
     'dmitry',
@@ -82,7 +95,7 @@ const NAMES = {
     'svetlana',
     'natalia',
   ],
-} as const;
+};
 
 const QUANTITY_OPTIONS = [5, 25, 100, 500] as const;
 
@@ -90,11 +103,36 @@ function randomItem<T>(items: readonly T[]) {
   return items[Math.floor(Math.random() * items.length)];
 }
 
-function createAddress(domain: string, format: Format): Address {
-  const surnamePair = randomItem(SURNAMES);
-  const feminine = Math.random() > 0.5;
+function normalizeNamePool(pool: NamePool): NamePool {
+  const seen = new Set<string>();
+  const normalize = (items: string[]) =>
+    items
+      .map((item) => item.trim().toLowerCase())
+      .filter((item) => item && !seen.has(item))
+      .filter((item) => {
+        seen.add(item);
+        return true;
+      });
+
+  return {
+    masculine: normalize(pool.masculine),
+    feminine: normalize(pool.feminine),
+  };
+}
+
+function createAddress(
+  domain: string,
+  format: Format,
+  surnames: SurnamePair[],
+  names: NamePool,
+): Address {
+  const surnamePair = randomItem(surnames);
+  const hasMasculineNames = names.masculine.length > 0;
+  const hasFeminineNames = names.feminine.length > 0;
+  const feminine =
+    hasFeminineNames && (!hasMasculineNames || Math.random() > 0.5);
   const surname = feminine ? surnamePair.feminine : surnamePair.masculine;
-  const name = randomItem(feminine ? NAMES.feminine : NAMES.masculine);
+  const name = randomItem(feminine ? names.feminine : names.masculine);
   const number = Math.floor(10 + Math.random() * 90);
   const localPart = format.template
     .replace(/\{surname\}/gi, surname)
@@ -132,18 +170,31 @@ function compileFormatRegex(pattern: string, domain: string) {
   }
 }
 
-function makeAddresses(domains: string[], formats: Format[], count = 5) {
+function makeAddresses(
+  domains: string[],
+  formats: Format[],
+  surnames: SurnamePair[],
+  names: NamePool,
+  count = 5,
+) {
   const values: Address[] = [];
   const seen = new Set<string>();
   let attempts = 0;
 
-  if (domains.length === 0 || formats.length === 0) return values;
+  if (
+    domains.length === 0 ||
+    formats.length === 0 ||
+    surnames.length === 0 ||
+    (names.masculine.length === 0 && names.feminine.length === 0)
+  ) {
+    return values;
+  }
 
   while (values.length < count && attempts < count * 100) {
     const domain = domains[attempts % domains.length];
     const format = formats[attempts % formats.length];
     const compiled = compileFormatRegex(format.regex ?? '', domain);
-    const next = createAddress(domain, format);
+    const next = createAddress(domain, format, surnames, names);
     attempts += 1;
 
     if (
@@ -174,6 +225,8 @@ export default function HomeScreen() {
   const [domains, setDomains] = useState<string[]>([...DEFAULT_DOMAINS]);
   const [selectedDomains, setSelectedDomains] = useState<string[]>(['mail.ru']);
   const [formats, setFormats] = useState<Format[]>(DEFAULT_FORMATS);
+  const [surnamePairs, setSurnamePairs] = useState<SurnamePair[]>(DEFAULT_SURNAMES);
+  const [namePool, setNamePool] = useState<NamePool>(() => normalizeNamePool(DEFAULT_NAMES));
   const [selectedFormatIds, setSelectedFormatIds] = useState<string[]>(
     DEFAULT_FORMATS.map((format) => format.id),
   );
@@ -184,6 +237,12 @@ export default function HomeScreen() {
   const [domainDraft, setDomainDraft] = useState<string>('');
   const [showAddFormat, setShowAddFormat] = useState<boolean>(false);
   const [showAddDomain, setShowAddDomain] = useState<boolean>(false);
+  const [showNamePool, setShowNamePool] = useState<boolean>(false);
+  const [showSurnamePool, setShowSurnamePool] = useState<boolean>(false);
+  const [nameDraft, setNameDraft] = useState<string>('');
+  const [nameGender, setNameGender] = useState<Gender>('masculine');
+  const [surnameMasculineDraft, setSurnameMasculineDraft] = useState<string>('');
+  const [surnameFeminineDraft, setSurnameFeminineDraft] = useState<string>('');
   const [showEmailSettings, setShowEmailSettings] = useState<boolean>(false);
   const [smtpHost, setSmtpHost] = useState<string>('');
   const [smtpPort, setSmtpPort] = useState<string>('587');
@@ -196,7 +255,7 @@ export default function HomeScreen() {
     'Hello,\n\nThis is a sample message sent to a generated email address.',
   );
   const [addresses, setAddresses] = useState<Address[]>(() =>
-    makeAddresses(['mail.ru'], DEFAULT_FORMATS),
+    makeAddresses(['mail.ru'], DEFAULT_FORMATS, DEFAULT_SURNAMES, DEFAULT_NAMES),
   );
   const sendEmailMutation = useSendEmail();
 
@@ -209,11 +268,27 @@ export default function HomeScreen() {
     () => compileFormatRegex(regexDraft, selectedDomains[0] ?? 'domain.com'),
     [regexDraft, selectedDomains],
   );
-  const canGenerate = selectedDomains.length > 0 && selectedFormats.length > 0;
+  const canGenerate =
+    selectedDomains.length > 0 &&
+    selectedFormats.length > 0 &&
+    surnamePairs.length > 0 &&
+    (namePool.masculine.length > 0 || namePool.feminine.length > 0);
+
+  const regenerateWith = (
+    nextDomains = selectedDomains,
+    nextFormats = selectedFormats,
+    nextSurnames = surnamePairs,
+    nextNames = namePool,
+    nextQuantity = quantity,
+  ) => {
+    setAddresses(
+      makeAddresses(nextDomains, nextFormats, nextSurnames, nextNames, nextQuantity),
+    );
+  };
 
   const regenerate = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    setAddresses(makeAddresses(selectedDomains, selectedFormats, quantity));
+    regenerateWith();
   };
 
   const toggleDomain = (nextDomain: string) => {
@@ -221,7 +296,7 @@ export default function HomeScreen() {
       ? selectedDomains.filter((item) => item !== nextDomain)
       : [...selectedDomains, nextDomain];
     setSelectedDomains(nextSelected);
-    setAddresses(makeAddresses(nextSelected, selectedFormats, quantity));
+    regenerateWith(nextSelected);
     Haptics.selectionAsync();
   };
 
@@ -230,7 +305,7 @@ export default function HomeScreen() {
     const nextSelected = selectedDomains.filter((item) => item !== domainToRemove);
     setDomains(nextDomains);
     setSelectedDomains(nextSelected);
-    setAddresses(makeAddresses(nextSelected, selectedFormats, quantity));
+    regenerateWith(nextSelected);
   };
 
   const addDomain = () => {
@@ -255,7 +330,7 @@ export default function HomeScreen() {
     setSelectedDomains(nextSelected);
     setDomainDraft('');
     setShowAddDomain(false);
-    setAddresses(makeAddresses(nextSelected, selectedFormats, quantity));
+    regenerateWith(nextSelected);
   };
 
   const toggleFormat = (formatId: string) => {
@@ -264,7 +339,7 @@ export default function HomeScreen() {
       : [...selectedFormatIds, formatId];
     setSelectedFormatIds(nextSelected);
     const nextFormats = formats.filter((format) => nextSelected.includes(format.id));
-    setAddresses(makeAddresses(selectedDomains, nextFormats, quantity));
+    regenerateWith(selectedDomains, nextFormats);
     Haptics.selectionAsync();
   };
 
@@ -276,9 +351,7 @@ export default function HomeScreen() {
     );
     setFormats(nextFormats);
     setSelectedFormatIds(nextSelectedIds);
-    setAddresses(
-      makeAddresses(selectedDomains, nextSelectedFormats, quantity),
-    );
+    regenerateWith(selectedDomains, nextSelectedFormats);
   };
 
   const addFormat = () => {
@@ -313,20 +386,88 @@ export default function HomeScreen() {
     setFormatDraft('');
     setRegexDraft('');
     setShowAddFormat(false);
-    setAddresses(
-      makeAddresses(
-        selectedDomains,
-        nextFormats.filter((format) => nextSelectedIds.includes(format.id)),
-        quantity,
-      ),
+    regenerateWith(
+      selectedDomains,
+      nextFormats.filter((format) => nextSelectedIds.includes(format.id)),
     );
+  };
+
+  const addName = () => {
+    const name = nameDraft.trim().toLowerCase();
+    if (!/^[a-z]+$/.test(name)) {
+      Alert.alert('Check the name', 'Use letters only, such as alexey or anna.');
+      return;
+    }
+
+    const normalizedPool = normalizeNamePool(namePool);
+    if (
+      normalizedPool.masculine.includes(name) ||
+      normalizedPool.feminine.includes(name)
+    ) {
+      Alert.alert('Already added', `${name} already exists in the name pool.`);
+      return;
+    }
+
+    const nextPool = normalizeNamePool({
+      ...normalizedPool,
+      [nameGender]: [...normalizedPool[nameGender], name],
+    });
+    setNamePool(nextPool);
+    setNameDraft('');
+    regenerateWith(selectedDomains, selectedFormats, surnamePairs, nextPool);
+  };
+
+  const removeName = (gender: Gender, nameToRemove: string) => {
+    const nextPool = normalizeNamePool({
+      ...namePool,
+      [gender]: namePool[gender].filter((name) => name !== nameToRemove),
+    });
+    setNamePool(nextPool);
+    regenerateWith(selectedDomains, selectedFormats, surnamePairs, nextPool);
+  };
+
+  const addSurnamePair = () => {
+    const masculine = surnameMasculineDraft.trim().toLowerCase();
+    const feminine = surnameFeminineDraft.trim().toLowerCase();
+    if (!/^[a-z]+$/.test(masculine) || !/^[a-z]+$/.test(feminine)) {
+      Alert.alert(
+        'Check the surnames',
+        'Use letters only and add both masculine and feminine forms.',
+      );
+      return;
+    }
+    if (
+      surnamePairs.some(
+        (pair) => pair.masculine === masculine || pair.feminine === feminine,
+      )
+    ) {
+      Alert.alert('Already added', 'One of these surname forms is already in the pool.');
+      return;
+    }
+
+    const nextPair: SurnamePair = {
+      id: `${masculine}-${feminine}-${Date.now()}`,
+      masculine,
+      feminine,
+    };
+    const nextSurnames = [...surnamePairs, nextPair];
+    setSurnamePairs(nextSurnames);
+    setSurnameMasculineDraft('');
+    setSurnameFeminineDraft('');
+    regenerateWith(selectedDomains, selectedFormats, nextSurnames, namePool);
+  };
+
+  const removeSurnamePair = (pairId: string) => {
+    const nextSurnames = surnamePairs.filter((pair) => pair.id !== pairId);
+    setSurnamePairs(nextSurnames);
+    regenerateWith(selectedDomains, selectedFormats, nextSurnames, namePool);
   };
 
   const updateQuantity = (nextQuantity: number) => {
     const safeQuantity = Math.min(500, Math.max(1, nextQuantity));
     setQuantity(safeQuantity);
     setQuantityInput(String(safeQuantity));
-    setAddresses(makeAddresses(selectedDomains, selectedFormats, safeQuantity));
+    regenerateWith(selectedDomains, selectedFormats, surnamePairs, namePool, safeQuantity);
     Haptics.selectionAsync();
   };
 
@@ -747,6 +888,266 @@ export default function HomeScreen() {
                 {showAddFormat ? 'Close format editor' : 'Add format'}
               </Text>
             </Pressable>
+
+            <Text style={[styles.sectionLabel, { color: colors.mutedForeground }]}>
+              NAME POOL
+            </Text>
+            <Pressable
+              testID="name-pool-toggle"
+              accessibilityRole="button"
+              accessibilityLabel={`${showNamePool ? 'Close' : 'Open'} name pool`}
+              onPress={() => setShowNamePool((visible) => !visible)}
+              style={({ pressed }) => [
+                styles.poolHeader,
+                {
+                  backgroundColor: colors.card,
+                  borderColor: colors.border,
+                  opacity: pressed ? 0.75 : 1,
+                },
+              ]}
+            >
+              <View style={styles.poolHeaderCopy}>
+                <Feather name="users" size={16} color={colors.accent} />
+                <View style={styles.poolTitleWrap}>
+                  <Text style={[styles.poolTitle, { color: colors.foreground }]}>
+                    Names
+                  </Text>
+                  <Text style={[styles.poolSubtitle, { color: colors.mutedForeground }]}>
+                    {namePool.masculine.length + namePool.feminine.length} total ·{' '}
+                    {namePool.masculine.length} masculine · {namePool.feminine.length} feminine
+                  </Text>
+                </View>
+              </View>
+              <Feather
+                name={showNamePool ? 'chevron-up' : 'chevron-down'}
+                size={18}
+                color={colors.mutedForeground}
+              />
+            </Pressable>
+            {showNamePool ? (
+              <View style={[styles.poolPanel, { backgroundColor: colors.card }]}>
+                <Text style={[styles.poolGroupLabel, { color: colors.mutedForeground }]}>
+                  MASCULINE
+                </Text>
+                <View style={styles.poolChipWrap}>
+                  {namePool.masculine.map((name) => (
+                    <View
+                      key={`masculine-${name}`}
+                      style={[styles.poolChip, { backgroundColor: colors.secondary }]}
+                    >
+                      <Text style={[styles.poolChipText, { color: colors.foreground }]}>
+                        {name}
+                      </Text>
+                      <Pressable
+                        testID={`remove-masculine-name-${name}`}
+                        accessibilityRole="button"
+                        accessibilityLabel={`Remove masculine name ${name}`}
+                        onPress={() => removeName('masculine', name)}
+                        style={styles.poolChipRemove}
+                      >
+                        <Feather name="x" size={12} color={colors.mutedForeground} />
+                      </Pressable>
+                    </View>
+                  ))}
+                </View>
+                <Text style={[styles.poolGroupLabel, { color: colors.mutedForeground }]}>
+                  FEMININE
+                </Text>
+                <View style={styles.poolChipWrap}>
+                  {namePool.feminine.map((name) => (
+                    <View
+                      key={`feminine-${name}`}
+                      style={[styles.poolChip, { backgroundColor: colors.secondary }]}
+                    >
+                      <Text style={[styles.poolChipText, { color: colors.foreground }]}>
+                        {name}
+                      </Text>
+                      <Pressable
+                        testID={`remove-feminine-name-${name}`}
+                        accessibilityRole="button"
+                        accessibilityLabel={`Remove feminine name ${name}`}
+                        onPress={() => removeName('feminine', name)}
+                        style={styles.poolChipRemove}
+                      >
+                        <Feather name="x" size={12} color={colors.mutedForeground} />
+                      </Pressable>
+                    </View>
+                  ))}
+                </View>
+                <View style={styles.poolGenderToggle}>
+                  {(['masculine', 'feminine'] as const).map((gender) => (
+                    <Pressable
+                      key={gender}
+                      testID={`name-gender-${gender}`}
+                      accessibilityRole="button"
+                      accessibilityState={{ selected: nameGender === gender }}
+                      onPress={() => setNameGender(gender)}
+                      style={[
+                        styles.poolGenderOption,
+                        {
+                          backgroundColor:
+                            nameGender === gender ? colors.accent : colors.secondary,
+                        },
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.poolGenderText,
+                          {
+                            color:
+                              nameGender === gender
+                                ? colors.accentForeground
+                                : colors.mutedForeground,
+                          },
+                        ]}
+                      >
+                        {gender === 'masculine' ? 'Masculine' : 'Feminine'}
+                      </Text>
+                    </Pressable>
+                  ))}
+                </View>
+                <View style={styles.addRow}>
+                  <TextInput
+                    testID="name-input"
+                    accessibilityLabel={`New ${nameGender} name`}
+                    value={nameDraft}
+                    onChangeText={setNameDraft}
+                    onSubmitEditing={addName}
+                    placeholder={nameGender === 'masculine' ? 'alexey' : 'anna'}
+                    placeholderTextColor={colors.mutedForeground}
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    style={[
+                      styles.addInput,
+                      { backgroundColor: colors.secondary, color: colors.foreground },
+                    ]}
+                  />
+                  <Pressable
+                    testID="add-name-button"
+                    accessibilityRole="button"
+                    accessibilityLabel={`Add ${nameGender} name`}
+                    onPress={addName}
+                    style={({ pressed }) => [
+                      styles.smallActionButton,
+                      { backgroundColor: colors.accent, opacity: pressed ? 0.7 : 1 },
+                    ]}
+                  >
+                    <Feather name="plus" size={17} color={colors.accentForeground} />
+                  </Pressable>
+                </View>
+                <Text style={[styles.poolHelp, { color: colors.mutedForeground }]}>
+                  Duplicate names are ignored so each name appears only once in its gender pool.
+                </Text>
+              </View>
+            ) : null}
+
+            <Text style={[styles.sectionLabel, { color: colors.mutedForeground }]}>
+              SURNAME POOL
+            </Text>
+            <Pressable
+              testID="surname-pool-toggle"
+              accessibilityRole="button"
+              accessibilityLabel={`${showSurnamePool ? 'Close' : 'Open'} surname pool`}
+              onPress={() => setShowSurnamePool((visible) => !visible)}
+              style={({ pressed }) => [
+                styles.poolHeader,
+                {
+                  backgroundColor: colors.card,
+                  borderColor: colors.border,
+                  opacity: pressed ? 0.75 : 1,
+                },
+              ]}
+            >
+              <View style={styles.poolHeaderCopy}>
+                <Feather name="book-open" size={16} color={colors.accent} />
+                <View style={styles.poolTitleWrap}>
+                  <Text style={[styles.poolTitle, { color: colors.foreground }]}>
+                    Surnames
+                  </Text>
+                  <Text style={[styles.poolSubtitle, { color: colors.mutedForeground }]}>
+                    {surnamePairs.length} masculine/feminine pairs
+                  </Text>
+                </View>
+              </View>
+              <Feather
+                name={showSurnamePool ? 'chevron-up' : 'chevron-down'}
+                size={18}
+                color={colors.mutedForeground}
+              />
+            </Pressable>
+            {showSurnamePool ? (
+              <View style={[styles.poolPanel, { backgroundColor: colors.card }]}>
+                <View style={styles.surnamePairList}>
+                  {surnamePairs.map((pair) => (
+                    <View key={pair.id} style={styles.surnamePairRow}>
+                      <View style={styles.surnamePairCopy}>
+                        <Text style={[styles.surnamePairText, { color: colors.foreground }]}>
+                          {pair.masculine}
+                        </Text>
+                        <Text style={[styles.surnamePairDivider, { color: colors.accent }]}>
+                          /
+                        </Text>
+                        <Text style={[styles.surnamePairText, { color: colors.foreground }]}>
+                          {pair.feminine}
+                        </Text>
+                      </View>
+                      <Pressable
+                        testID={`remove-surname-${pair.id}`}
+                        accessibilityRole="button"
+                        accessibilityLabel={`Remove surname pair ${pair.masculine} and ${pair.feminine}`}
+                        onPress={() => removeSurnamePair(pair.id)}
+                        style={styles.poolChipRemove}
+                      >
+                        <Feather name="trash-2" size={14} color={colors.mutedForeground} />
+                      </Pressable>
+                    </View>
+                  ))}
+                </View>
+                <TextInput
+                  testID="surname-masculine-input"
+                  accessibilityLabel="New masculine surname"
+                  value={surnameMasculineDraft}
+                  onChangeText={setSurnameMasculineDraft}
+                  placeholder="ivanov"
+                  placeholderTextColor={colors.mutedForeground}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  style={[
+                    styles.addInput,
+                    { backgroundColor: colors.secondary, color: colors.foreground },
+                  ]}
+                />
+                <TextInput
+                  testID="surname-feminine-input"
+                  accessibilityLabel="New feminine surname"
+                  value={surnameFeminineDraft}
+                  onChangeText={setSurnameFeminineDraft}
+                  placeholder="ivanova"
+                  placeholderTextColor={colors.mutedForeground}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  style={[
+                    styles.addInput,
+                    { backgroundColor: colors.secondary, color: colors.foreground },
+                  ]}
+                />
+                <Pressable
+                  testID="add-surname-button"
+                  accessibilityRole="button"
+                  accessibilityLabel="Add surname pair"
+                  onPress={addSurnamePair}
+                  style={({ pressed }) => [
+                    styles.addConfirmButton,
+                    { backgroundColor: colors.accent, opacity: pressed ? 0.7 : 1 },
+                  ]}
+                >
+                  <Feather name="plus" size={15} color={colors.accentForeground} />
+                  <Text style={[styles.generateButtonText, { color: colors.accentForeground }]}>
+                    Add surname pair
+                  </Text>
+                </Pressable>
+              </View>
+            ) : null}
 
             <Text style={[styles.sectionLabel, { color: colors.mutedForeground }]}>
               LIST SIZE
@@ -1362,6 +1763,115 @@ const styles = StyleSheet.create({
     padding: 11,
     borderRadius: 14,
     gap: 8,
+  },
+  poolHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    minHeight: 62,
+    paddingHorizontal: 13,
+    borderWidth: 1,
+    borderRadius: 16,
+  },
+  poolHeaderCopy: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+    gap: 10,
+  },
+  poolTitleWrap: {
+    flex: 1,
+  },
+  poolTitle: {
+    fontFamily: 'Inter_600SemiBold',
+    fontSize: 13,
+  },
+  poolSubtitle: {
+    marginTop: 3,
+    fontFamily: 'Inter_400Regular',
+    fontSize: 11,
+  },
+  poolPanel: {
+    marginTop: 8,
+    padding: 13,
+    borderRadius: 16,
+    gap: 9,
+  },
+  poolGroupLabel: {
+    marginTop: 2,
+    fontFamily: 'Inter_700Bold',
+    fontSize: 9,
+    letterSpacing: 1.2,
+  },
+  poolChipWrap: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 7,
+  },
+  poolChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    minHeight: 31,
+    paddingLeft: 10,
+    paddingRight: 5,
+    borderRadius: 10,
+    gap: 3,
+  },
+  poolChipText: {
+    fontFamily: 'Inter_500Medium',
+    fontSize: 11,
+  },
+  poolChipRemove: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: 25,
+    height: 25,
+  },
+  poolGenderToggle: {
+    flexDirection: 'row',
+    padding: 3,
+    borderRadius: 11,
+    gap: 3,
+  },
+  poolGenderOption: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 35,
+    borderRadius: 9,
+  },
+  poolGenderText: {
+    fontFamily: 'Inter_600SemiBold',
+    fontSize: 11,
+  },
+  poolHelp: {
+    fontFamily: 'Inter_400Regular',
+    fontSize: 10,
+    lineHeight: 15,
+  },
+  surnamePairList: {
+    gap: 5,
+  },
+  surnamePairRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    minHeight: 38,
+    paddingLeft: 11,
+    borderRadius: 10,
+  },
+  surnamePairCopy: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 7,
+  },
+  surnamePairText: {
+    fontFamily: 'Inter_500Medium',
+    fontSize: 12,
+  },
+  surnamePairDivider: {
+    fontFamily: 'Inter_700Bold',
+    fontSize: 12,
   },
   emailSettingsHeader: {
     flexDirection: 'row',
