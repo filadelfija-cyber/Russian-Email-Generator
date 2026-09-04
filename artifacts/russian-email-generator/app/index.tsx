@@ -19,6 +19,7 @@ type Format = {
   id: string;
   label: string;
   template: string;
+  regex?: string;
   builtIn?: boolean;
 };
 
@@ -55,20 +56,30 @@ const SURNAMES = [
   { masculine: 'lebedev', feminine: 'lebedeva' },
 ] as const;
 
-const NAMES = [
-  'alexey',
-  'dmitry',
-  'nikita',
-  'anna',
-  'elena',
-  'marina',
-  'irina',
-  'maxim',
-  'sergey',
-  'olga',
-  'artem',
-  'katya',
-] as const;
+const NAMES = {
+  masculine: [
+    'alexey',
+    'dmitry',
+    'nikita',
+    'maxim',
+    'sergey',
+    'artem',
+    'ivan',
+    'andrey',
+    'mikhail',
+  ],
+  feminine: [
+    'anna',
+    'elena',
+    'marina',
+    'irina',
+    'olga',
+    'katya',
+    'maria',
+    'svetlana',
+    'natalia',
+  ],
+} as const;
 
 const QUANTITY_OPTIONS = [5, 25, 100, 500] as const;
 
@@ -80,7 +91,7 @@ function createAddress(domain: string, format: Format): Address {
   const surnamePair = randomItem(SURNAMES);
   const feminine = Math.random() > 0.5;
   const surname = feminine ? surnamePair.feminine : surnamePair.masculine;
-  const name = randomItem(NAMES);
+  const name = randomItem(feminine ? NAMES.feminine : NAMES.masculine);
   const number = Math.floor(10 + Math.random() * 90);
   const localPart = format.template
     .replace(/\{surname\}/gi, surname)
@@ -118,12 +129,7 @@ function compileFormatRegex(pattern: string, domain: string) {
   }
 }
 
-function makeAddresses(
-  domains: string[],
-  pattern: string,
-  formats: Format[],
-  count = 5,
-) {
+function makeAddresses(domains: string[], formats: Format[], count = 5) {
   const values: Address[] = [];
   const seen = new Set<string>();
   let attempts = 0;
@@ -133,7 +139,7 @@ function makeAddresses(
   while (values.length < count && attempts < count * 100) {
     const domain = domains[attempts % domains.length];
     const format = formats[attempts % formats.length];
-    const compiled = compileFormatRegex(pattern, domain);
+    const compiled = compileFormatRegex(format.regex ?? '', domain);
     const next = createAddress(domain, format);
     attempts += 1;
 
@@ -170,13 +176,13 @@ export default function HomeScreen() {
   );
   const [quantity, setQuantity] = useState<number>(5);
   const [quantityInput, setQuantityInput] = useState<string>('5');
-  const [formatPattern, setFormatPattern] = useState<string>('');
   const [formatDraft, setFormatDraft] = useState<string>('');
+  const [regexDraft, setRegexDraft] = useState<string>('');
   const [domainDraft, setDomainDraft] = useState<string>('');
   const [showAddFormat, setShowAddFormat] = useState<boolean>(false);
   const [showAddDomain, setShowAddDomain] = useState<boolean>(false);
   const [addresses, setAddresses] = useState<Address[]>(() =>
-    makeAddresses(['mail.ru'], '', DEFAULT_FORMATS),
+    makeAddresses(['mail.ru'], DEFAULT_FORMATS),
   );
 
   const featured = addresses[0];
@@ -184,15 +190,15 @@ export default function HomeScreen() {
     () => formats.filter((format) => selectedFormatIds.includes(format.id)),
     [formats, selectedFormatIds],
   );
-  const regexState = useMemo(
-    () => compileFormatRegex(formatPattern, selectedDomains[0] ?? 'domain.com'),
-    [formatPattern, selectedDomains],
+  const draftRegexState = useMemo(
+    () => compileFormatRegex(regexDraft, selectedDomains[0] ?? 'domain.com'),
+    [regexDraft, selectedDomains],
   );
   const canGenerate = selectedDomains.length > 0 && selectedFormats.length > 0;
 
   const regenerate = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    setAddresses(makeAddresses(selectedDomains, formatPattern, selectedFormats, quantity));
+    setAddresses(makeAddresses(selectedDomains, selectedFormats, quantity));
   };
 
   const toggleDomain = (nextDomain: string) => {
@@ -200,7 +206,7 @@ export default function HomeScreen() {
       ? selectedDomains.filter((item) => item !== nextDomain)
       : [...selectedDomains, nextDomain];
     setSelectedDomains(nextSelected);
-    setAddresses(makeAddresses(nextSelected, formatPattern, selectedFormats, quantity));
+    setAddresses(makeAddresses(nextSelected, selectedFormats, quantity));
     Haptics.selectionAsync();
   };
 
@@ -209,7 +215,7 @@ export default function HomeScreen() {
     const nextSelected = selectedDomains.filter((item) => item !== domainToRemove);
     setDomains(nextDomains);
     setSelectedDomains(nextSelected);
-    setAddresses(makeAddresses(nextSelected, formatPattern, selectedFormats, quantity));
+    setAddresses(makeAddresses(nextSelected, selectedFormats, quantity));
   };
 
   const addDomain = () => {
@@ -234,7 +240,7 @@ export default function HomeScreen() {
     setSelectedDomains(nextSelected);
     setDomainDraft('');
     setShowAddDomain(false);
-    setAddresses(makeAddresses(nextSelected, formatPattern, selectedFormats, quantity));
+    setAddresses(makeAddresses(nextSelected, selectedFormats, quantity));
   };
 
   const toggleFormat = (formatId: string) => {
@@ -243,7 +249,7 @@ export default function HomeScreen() {
       : [...selectedFormatIds, formatId];
     setSelectedFormatIds(nextSelected);
     const nextFormats = formats.filter((format) => nextSelected.includes(format.id));
-    setAddresses(makeAddresses(selectedDomains, formatPattern, nextFormats, quantity));
+    setAddresses(makeAddresses(selectedDomains, nextFormats, quantity));
     Haptics.selectionAsync();
   };
 
@@ -256,7 +262,7 @@ export default function HomeScreen() {
     setFormats(nextFormats);
     setSelectedFormatIds(nextSelectedIds);
     setAddresses(
-      makeAddresses(selectedDomains, formatPattern, nextSelectedFormats, quantity),
+      makeAddresses(selectedDomains, nextSelectedFormats, quantity),
     );
   };
 
@@ -274,22 +280,27 @@ export default function HomeScreen() {
       );
       return;
     }
+    if (draftRegexState.error) {
+      Alert.alert('Check the regex', draftRegexState.error);
+      return;
+    }
 
     const newFormat: Format = {
       id: `custom-${Date.now()}`,
       label: `Custom · ${template}`,
       template,
+      regex: regexDraft.trim() || undefined,
     };
     const nextFormats = [...formats, newFormat];
     const nextSelectedIds = [...selectedFormatIds, newFormat.id];
     setFormats(nextFormats);
     setSelectedFormatIds(nextSelectedIds);
     setFormatDraft('');
+    setRegexDraft('');
     setShowAddFormat(false);
     setAddresses(
       makeAddresses(
         selectedDomains,
-        formatPattern,
         nextFormats.filter((format) => nextSelectedIds.includes(format.id)),
         quantity,
       ),
@@ -300,18 +311,13 @@ export default function HomeScreen() {
     const safeQuantity = Math.min(500, Math.max(1, nextQuantity));
     setQuantity(safeQuantity);
     setQuantityInput(String(safeQuantity));
-    setAddresses(makeAddresses(selectedDomains, formatPattern, selectedFormats, safeQuantity));
+    setAddresses(makeAddresses(selectedDomains, selectedFormats, safeQuantity));
     Haptics.selectionAsync();
   };
 
   const applyTypedQuantity = () => {
     const parsed = Number.parseInt(quantityInput, 10);
     updateQuantity(Number.isNaN(parsed) ? 5 : parsed);
-  };
-
-  const applyFormatPattern = () => {
-    setAddresses(makeAddresses(selectedDomains, formatPattern, selectedFormats, quantity));
-    Haptics.selectionAsync();
   };
 
   const copyText = async (value: string, message: string) => {
@@ -609,7 +615,35 @@ export default function HomeScreen() {
                   ]}
                 />
                 <Text style={[styles.addHelp, { color: colors.mutedForeground }]}>
-                  Use {'{surname}'}, {'{name}'}, or {'{number}'}. Domains are managed above.
+                  Use {'{surname}'}, {'{name}'}, or {'{number}'}.
+                </Text>
+                <TextInput
+                  testID="format-regex-input"
+                  accessibilityLabel="Regex filter for the new email format"
+                  value={regexDraft}
+                  onChangeText={setRegexDraft}
+                  placeholder="Optional regex filter"
+                  placeholderTextColor={colors.mutedForeground}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  spellCheck={false}
+                  style={[
+                    styles.addInput,
+                    { backgroundColor: colors.secondary, color: colors.foreground },
+                  ]}
+                />
+                <Text
+                  style={[
+                    styles.addHelp,
+                    {
+                      color: draftRegexState.error
+                        ? colors.destructive
+                        : colors.mutedForeground,
+                    },
+                  ]}
+                >
+                  {draftRegexState.error ??
+                    'Regex is optional and filters this format only. Tokens: {surname}, {name}, {number}, {domain}.'}
                 </Text>
                 <Pressable
                   testID="confirm-add-format-button"
@@ -715,60 +749,14 @@ export default function HomeScreen() {
               ))}
             </View>
 
-            <Text style={[styles.sectionLabel, { color: colors.mutedForeground }]}>
-              FORMAT REGEX
-            </Text>
-            <View style={[styles.patternInputWrap, { backgroundColor: colors.secondary }]}>
-              <Feather name="code" size={16} color={colors.mutedForeground} />
-              <TextInput
-                testID="format-regex-input"
-                accessibilityLabel="Custom email format regular expression"
-                value={formatPattern}
-                onChangeText={setFormatPattern}
-                onSubmitEditing={applyFormatPattern}
-                placeholder="^{surname}\\.{name}@{domain}$"
-                placeholderTextColor={colors.mutedForeground}
-                autoCapitalize="none"
-                autoCorrect={false}
-                spellCheck={false}
-                returnKeyType="done"
-                style={[styles.patternInput, { color: colors.foreground }]}
-              />
-              {formatPattern ? (
-                <Pressable
-                  testID="clear-format-regex-button"
-                  accessibilityRole="button"
-                  accessibilityLabel="Clear custom format regex"
-                  onPress={() => {
-                    setFormatPattern('');
-                    setAddresses(
-                      makeAddresses(selectedDomains, '', selectedFormats, quantity),
-                    );
-                  }}
-                  style={styles.clearPatternButton}
-                >
-                  <Feather name="x" size={16} color={colors.mutedForeground} />
-                </Pressable>
-              ) : null}
-            </View>
-            <Text
-              style={[
-                styles.patternHint,
-                { color: regexState.error ? colors.destructive : colors.mutedForeground },
-              ]}
-            >
-              {regexState.error ??
-                'Tokens: {surname}, {name}, {number}, {domain}. Leave blank to use checked formats.'}
-            </Text>
-
             <View style={styles.listHeading}>
               <View>
                 <Text style={[styles.listTitle, { color: colors.foreground }]}>
                   Fresh suggestions
                 </Text>
                 <Text style={[styles.listSubtitle, { color: colors.mutedForeground }]}>
-                  {formatPattern ? 'Regex filtered' : 'Checked formats'} ·{' '}
-                  {selectedDomains.length} domain{selectedDomains.length === 1 ? '' : 's'} ·{' '}
+                  Checked formats · {selectedDomains.length} domain
+                  {selectedDomains.length === 1 ? '' : 's'} ·{' '}
                   {addresses.length} results
                 </Text>
               </View>
