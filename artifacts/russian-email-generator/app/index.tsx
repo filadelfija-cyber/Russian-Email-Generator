@@ -105,46 +105,27 @@ const DEFAULT_SURNAMES: SurnamePair[] = DEFAULT_SURNAME_MASCULINE.map((masculine
 const DEFAULT_NAMES: NamePool = {
   masculine: `
     alexey dmitry nikita maxim sergey artem ivan andrey mikhail aleksandr vladimir
-    evgeny daniil kirill roman ilya pavel anton denis oleg victor konstantin
+    evgeny daniil kirill roman ilya pavel anton denis oleg viktor konstantin
     nikolay vasily yuri georgy grigory stanislav vyacheslav ruslan timofey fedor
-    lev matvey mark artemy yaroslav gleb boris vadim igor valery vitaly leonid
-    gennady semyon yegor stepan zakhar savva nikolay miron danil dmitriy aleksei
-    vladislav rostislav radomir robert rafael renat rinald askold albert adam
-    arkady arseny valerian veniamin vladlen german demyan ermolai innokenty
-    kornel lavr makar maksimilian marat moisei naum nicephor nikodim nikon
-    omelyan plat on prokofy rodion samuil spartak tikhon trofim yaropolk
-    yaromir yermolai yulian yuri yustin avdey avvakum agap akim almaz anisim
-    apollon arest arsen borislav bronislav vadim vadim vadim vasiliev vsevolod
-    vyacheslav davyd david daniyar demid dorofey emelyan epifan foma hariton
-    ignat ildar ilmir iliodor innokenty isaak karim kasimir klim klyment
-    kuzma lazar lukyan makar martyn modest nazar nikifor panteley parfen
-    patrick piotr savely serafim sidor stanislav terenty timur yan yanis
+    lev matvey mark yaroslav gleb boris vadim igor valery leonid stepan yegor
+    zakhar miron danil vladislav rostislav rodion savely timur yan david
+    ignat klim lukyan makar nazar
   `.replace(/[^a-z\s]/gi, '').trim().split(/\s+/),
   feminine: `
     anna elena marina irina olga katya maria svetlana natalia aleksandra
     ekaterina tatiana vera galina lyudmila nadezhda valentina tamara
-    ljubov nina raisa zinaida larisa lydia tsvetana darya daria polina
-    sofia sonya anastasia anjelika kristina karina alina arina vasilisa
-    varvara veronika viktoria vitalina valeria yulia yuliya oksana
-    ksenia kseniya elizaveta elizabeth margarita svetlana nadejda
-    milana milena mira miroslava nadia nika nelli nonna olesya
-    oksana olena olga pelageya regina rita rimma rufina ruslana
-    sabina sabrina samira selena serafima snezhana stella susanna
-    tayana taya teona uliyana ulyana ursula faina feodora felicia
-    frida yasmina yaroslava yarina yana yana agata agnessa agnia
-    anastasiya anfiya anisa anisia antonina apollinaria ariadna
-    bella bogdana bronislava vladislava vladlena vlada venera
-    diana dina dominika evdokiya efrosinya elvira emma esenia
-    evgenia evgeniya galya ganna glafira dina irena ivanna
-    kira klara klavdia larisa liliya lilya lola lolita
-    magdalena maya melania melissa nadine nargiz natasha nelli
-    nikolina nikolya olimpiada olya pamela paraskeva patricia
-    roza rosalina rufina sofya stefaniya taisia taisiya taya
-    ulyana felicia florentina haritina charlotte evelina
+    nina larisa lydia darya polina sofia sonya
+    anastasia kristina karina alina arina vasilisa varvara veronika
+    viktoria valeria yulia oksana ksenia elizaveta margarita milana
+    milena mira miroslava nadia nika olesya olena pelageya regina
+    rita ruslana sabina snezhana taya uliyana yasmina yaroslava yana
+    antonina bogdana vladislava diana dina elvira emma kira liliya
+    lola maya melania natasha
+    sofya taisia evelina
   `.replace(/[^a-z\s]/gi, '').trim().split(/\s+/),
 };
 
-const QUANTITY_OPTIONS = [5, 25, 100, 500] as const;
+const QUANTITY_OPTIONS = [1, 5, 25, 100, 250, 500] as const;
 
 function randomItem<T>(items: readonly T[]) {
   return items[Math.floor(Math.random() * items.length)];
@@ -1201,6 +1182,20 @@ export default function HomeScreen() {
             </Text>
             <View style={styles.quantityRow}>
               <View style={[styles.quantityInputWrap, { backgroundColor: colors.secondary }]}>
+                <Pressable
+                  testID="quantity-decrement"
+                  accessibilityRole="button"
+                  accessibilityLabel="Decrease email count"
+                  accessibilityState={{ disabled: quantity <= 1 }}
+                  onPress={() => updateQuantity(quantity - 1)}
+                  disabled={quantity <= 1}
+                  style={({ pressed }) => [
+                    styles.quantityStepperButton,
+                    { backgroundColor: colors.card, opacity: quantity <= 1 ? 0.35 : pressed ? 0.65 : 1 },
+                  ]}
+                >
+                  <Feather name="minus" size={15} color={colors.mutedForeground} />
+                </Pressable>
                 <TextInput
                   testID="quantity-input"
                   accessibilityLabel="Number of email addresses"
@@ -1213,6 +1208,20 @@ export default function HomeScreen() {
                   selectTextOnFocus
                   style={[styles.quantityInput, { color: colors.foreground }]}
                 />
+                <Pressable
+                  testID="quantity-increment"
+                  accessibilityRole="button"
+                  accessibilityLabel="Increase email count"
+                  accessibilityState={{ disabled: quantity >= 500 }}
+                  onPress={() => updateQuantity(quantity + 1)}
+                  disabled={quantity >= 500}
+                  style={({ pressed }) => [
+                    styles.quantityStepperButton,
+                    { backgroundColor: colors.card, opacity: quantity >= 500 ? 0.35 : pressed ? 0.65 : 1 },
+                  ]}
+                >
+                  <Feather name="plus" size={15} color={colors.mutedForeground} />
+                </Pressable>
                 <Text style={[styles.quantityHint, { color: colors.mutedForeground }]}>
                   of 500
                 </Text>
@@ -1656,12 +1665,22 @@ const styles = StyleSheet.create({
     minHeight: 48,
     paddingHorizontal: 14,
     borderRadius: 14,
+    gap: 5,
+  },
+  quantityStepperButton: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: 30,
+    height: 30,
+    borderRadius: 10,
   },
   quantityInput: {
+    flex: 1,
     minWidth: 32,
     paddingVertical: 0,
     fontFamily: 'Inter_700Bold',
     fontSize: 18,
+    textAlign: 'center',
   },
   quantityHint: {
     marginLeft: 7,
