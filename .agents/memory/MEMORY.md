@@ -1,0 +1,1 @@
+- [CI TypeScript project references](typescript-ci-references.md) — build composite workspace libraries before checking apps that reference their declaration outputs.
