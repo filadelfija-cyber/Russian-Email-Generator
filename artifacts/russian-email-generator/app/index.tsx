@@ -1,8 +1,9 @@
 import { Feather } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Clipboard from 'expo-clipboard';
 import * as Haptics from 'expo-haptics';
 import { StatusBar } from 'expo-status-bar';
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   Alert,
   FlatList,
@@ -30,6 +31,13 @@ type Address = {
   id: string;
   value: string;
   surname: string;
+};
+
+type SentEmailRecord = {
+  id: string;
+  email: string;
+  subject: string;
+  sentAt: string;
 };
 
 type Gender = 'masculine' | 'feminine';
@@ -126,9 +134,55 @@ const DEFAULT_NAMES: NamePool = {
 };
 
 const QUANTITY_OPTIONS = [1, 5, 25, 100, 250, 500] as const;
+const SENT_EMAIL_HISTORY_KEY = '@russian-email-generator/sent-email-history';
 
 function randomItem<T>(items: readonly T[]) {
   return items[Math.floor(Math.random() * items.length)];
+}
+
+function parseSentEmailHistory(rawValue: string | null): SentEmailRecord[] {
+  if (!rawValue) return [];
+
+  try {
+    const parsed = JSON.parse(rawValue);
+    if (!Array.isArray(parsed)) return [];
+
+    return parsed.filter(
+      (item): item is SentEmailRecord =>
+        item &&
+        typeof item.id === 'string' &&
+        typeof item.email === 'string' &&
+        typeof item.subject === 'string' &&
+        typeof item.sentAt === 'string',
+    );
+  } catch {
+    return [];
+  }
+}
+
+function addSentEmailRecords(
+  currentHistory: SentEmailRecord[],
+  recipients: string[],
+  subject: string,
+  sentAt: string,
+) {
+  const existingEmails = new Set(currentHistory.map((record) => record.email));
+  const newRecords = recipients
+    .filter((email) => !existingEmails.has(email))
+    .map((email, index) => ({
+      id: `${sentAt}-${index}-${Math.random().toString(36).slice(2, 8)}`,
+      email,
+      subject,
+      sentAt,
+    }));
+
+  return [...newRecords, ...currentHistory];
+}
+
+function formatSentAt(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString();
 }
 
 function normalizeNamePool(pool: NamePool): NamePool {
@@ -204,6 +258,7 @@ function makeAddresses(
   surnames: SurnamePair[],
   names: NamePool,
   count = 5,
+  excludedAddresses: ReadonlySet<string> = new Set<string>(),
 ) {
   const values: Address[] = [];
   const seen = new Set<string>();
@@ -230,6 +285,10 @@ function makeAddresses(
       !compiled.regex.test(next.value) &&
       !compiled.regex.test(next.value.split('@')[0])
     ) {
+      continue;
+    }
+
+    if (excludedAddresses.has(next.value)) {
       continue;
     }
 
@@ -282,6 +341,9 @@ export default function HomeScreen() {
   const [emailBody, setEmailBody] = useState<string>(
     'Hello,\n\nThis is a sample message sent to a generated email address.',
   );
+  const [sentHistory, setSentHistory] = useState<SentEmailRecord[]>([]);
+  const [historyLoaded, setHistoryLoaded] = useState<boolean>(false);
+  const [showHistory, setShowHistory] = useState<boolean>(false);
   const [addresses, setAddresses] = useState<Address[]>(() =>
     makeAddresses(['mail.ru'], DEFAULT_FORMATS, DEFAULT_SURNAMES, DEFAULT_NAMES),
   );
@@ -296,6 +358,10 @@ export default function HomeScreen() {
     () => compileFormatRegex(regexDraft, selectedDomains[0] ?? 'domain.com'),
     [regexDraft, selectedDomains],
   );
+  const sentEmailSet = useMemo(
+    () => new Set(sentHistory.map((record) => record.email)),
+    [sentHistory],
+  );
   const canGenerate =
     selectedDomains.length > 0 &&
     selectedFormats.length > 0 &&
@@ -308,11 +374,57 @@ export default function HomeScreen() {
     nextSurnames = surnamePairs,
     nextNames = namePool,
     nextQuantity = quantity,
+    nextExcluded = sentEmailSet,
   ) => {
     setAddresses(
-      makeAddresses(nextDomains, nextFormats, nextSurnames, nextNames, nextQuantity),
+      makeAddresses(
+        nextDomains,
+        nextFormats,
+        nextSurnames,
+        nextNames,
+        nextQuantity,
+        nextExcluded,
+      ),
     );
   };
+
+  useEffect(() => {
+    let active = true;
+
+    AsyncStorage.getItem(SENT_EMAIL_HISTORY_KEY)
+      .then((rawValue) => {
+        if (!active) return;
+        const history = parseSentEmailHistory(rawValue);
+        setSentHistory(history);
+        setHistoryLoaded(true);
+      })
+      .catch(() => {
+        if (!active) return;
+        setHistoryLoaded(true);
+        Alert.alert(
+          'History unavailable',
+          'Saved sent addresses could not be loaded from local storage.',
+        );
+      });
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!historyLoaded) return;
+    setAddresses(
+      makeAddresses(
+        selectedDomains,
+        selectedFormats,
+        surnamePairs,
+        namePool,
+        quantity,
+        sentEmailSet,
+      ),
+    );
+  }, [historyLoaded]);
 
   const regenerate = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -517,11 +629,47 @@ export default function HomeScreen() {
     );
   };
 
+  const clearSentHistory = () => {
+    if (sentHistory.length === 0) return;
+
+    Alert.alert(
+      'Clear sent history?',
+      'Addresses will become available for generation again.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Clear',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await AsyncStorage.removeItem(SENT_EMAIL_HISTORY_KEY);
+              setSentHistory([]);
+              regenerateWith(
+                selectedDomains,
+                selectedFormats,
+                surnamePairs,
+                namePool,
+                quantity,
+                new Set<string>(),
+              );
+            } catch {
+              Alert.alert('Could not clear history', 'Try again in a moment.');
+            }
+          },
+        },
+      ],
+    );
+  };
+
   const sendGeneratedEmail = async () => {
     const port = Number.parseInt(smtpPort, 10);
     const recipients = addresses.map((address) => address.value);
     const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
+    if (!historyLoaded) {
+      Alert.alert('Loading local history', 'Wait a moment before sending.');
+      return;
+    }
     if (recipients.length === 0) {
       Alert.alert('Nothing to send', 'Generate at least one address first.');
       return;
@@ -559,9 +707,38 @@ export default function HomeScreen() {
 
     try {
       const result = await sendEmailMutation.mutateAsync({ data: request });
+      const sentAt = new Date().toISOString();
+      const nextHistory = addSentEmailRecords(
+        sentHistory,
+        recipients,
+        emailSubject.trim(),
+        sentAt,
+      );
+      let historySaved = true;
+
+      setSentHistory(nextHistory);
+      try {
+        await AsyncStorage.setItem(
+          SENT_EMAIL_HISTORY_KEY,
+          JSON.stringify(nextHistory),
+        );
+      } catch {
+        historySaved = false;
+      }
+
+      regenerateWith(
+        selectedDomains,
+        selectedFormats,
+        surnamePairs,
+        namePool,
+        quantity,
+        new Set(nextHistory.map((record) => record.email)),
+      );
       Alert.alert(
-        'Email sent',
-        `Sent to ${result.sent} generated address${result.sent === 1 ? '' : 'es'}.`,
+        historySaved ? 'Email sent' : 'Email sent, history not saved',
+        historySaved
+          ? `Sent to ${result.sent} generated address${result.sent === 1 ? '' : 'es'}.`
+          : 'The message was sent, but the local sent-address history could not be saved.',
       );
       setSmtpPassword('');
     } catch {
@@ -1477,6 +1654,108 @@ export default function HomeScreen() {
               </View>
             ) : null}
 
+            <Text style={[styles.sectionLabel, { color: colors.mutedForeground }]}>
+              SENT HISTORY
+            </Text>
+            <Pressable
+              testID="sent-history-toggle"
+              accessibilityRole="button"
+              accessibilityLabel={`${showHistory ? 'Close' : 'Open'} sent email history`}
+              onPress={() => setShowHistory((visible) => !visible)}
+              style={({ pressed }) => [
+                styles.poolHeader,
+                {
+                  backgroundColor: colors.card,
+                  borderColor: colors.border,
+                  opacity: pressed ? 0.75 : 1,
+                },
+              ]}
+            >
+              <View style={styles.poolHeaderCopy}>
+                <Feather name="clock" size={16} color={colors.accent} />
+                <View style={styles.poolTitleWrap}>
+                  <Text style={[styles.poolTitle, { color: colors.foreground }]}>
+                    Sent recipients
+                  </Text>
+                  <Text style={[styles.poolSubtitle, { color: colors.mutedForeground }]}>
+                    {!historyLoaded
+                      ? 'Loading local history…'
+                      : `${sentHistory.length} unique address${sentHistory.length === 1 ? '' : 'es'}`}
+                  </Text>
+                </View>
+              </View>
+              <Feather
+                name={showHistory ? 'chevron-up' : 'chevron-down'}
+                size={18}
+                color={colors.mutedForeground}
+              />
+            </Pressable>
+            {showHistory ? (
+              <View style={[styles.historyPanel, { backgroundColor: colors.card }]}>
+                {sentHistory.length === 0 ? (
+                  <View style={styles.historyEmpty}>
+                    <Feather name="inbox" size={20} color={colors.mutedForeground} />
+                    <Text style={[styles.historyEmptyText, { color: colors.mutedForeground }]}>
+                      No sent addresses yet. Successful SMTP deliveries will appear here.
+                    </Text>
+                  </View>
+                ) : (
+                  <>
+                    <View style={styles.historyList}>
+                      {sentHistory.map((record) => (
+                        <View
+                          key={record.id}
+                          testID={`sent-history-${record.id}`}
+                          style={[styles.historyRow, { borderBottomColor: colors.border }]}
+                        >
+                          <View style={styles.historyRowCopy}>
+                            <Text
+                              numberOfLines={1}
+                              style={[styles.historyEmail, { color: colors.foreground }]}
+                            >
+                              {record.email}
+                            </Text>
+                            <Text
+                              numberOfLines={1}
+                              style={[styles.historyMeta, { color: colors.mutedForeground }]}
+                            >
+                              {formatSentAt(record.sentAt)} · {record.subject}
+                            </Text>
+                          </View>
+                          <Pressable
+                            testID={`copy-sent-history-${record.id}`}
+                            accessibilityRole="button"
+                            accessibilityLabel={`Copy sent address ${record.email}`}
+                            onPress={() =>
+                              copyText(record.email, 'The sent address is ready to paste.')
+                            }
+                            style={styles.poolChipRemove}
+                          >
+                            <Feather name="copy" size={14} color={colors.mutedForeground} />
+                          </Pressable>
+                        </View>
+                      ))}
+                    </View>
+                    <Pressable
+                      testID="clear-sent-history-button"
+                      accessibilityRole="button"
+                      accessibilityLabel="Clear sent email history"
+                      onPress={clearSentHistory}
+                      style={({ pressed }) => [
+                        styles.clearHistoryButton,
+                        { borderColor: colors.border, opacity: pressed ? 0.65 : 1 },
+                      ]}
+                    >
+                      <Feather name="trash-2" size={14} color={colors.primary} />
+                      <Text style={[styles.clearHistoryText, { color: colors.primary }]}>
+                        Clear history
+                      </Text>
+                    </Pressable>
+                  </>
+                )}
+              </View>
+            ) : null}
+
             <View style={styles.listHeading}>
               <View>
                 <Text style={[styles.listTitle, { color: colors.foreground }]}>
@@ -1914,6 +2193,60 @@ const styles = StyleSheet.create({
     fontFamily: 'Inter_400Regular',
     fontSize: 10,
     lineHeight: 15,
+  },
+  historyPanel: {
+    marginTop: 8,
+    padding: 13,
+    borderRadius: 16,
+    gap: 11,
+  },
+  historyEmpty: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 9,
+  },
+  historyEmptyText: {
+    flex: 1,
+    fontFamily: 'Inter_400Regular',
+    fontSize: 11,
+    lineHeight: 16,
+  },
+  historyList: {
+    gap: 0,
+  },
+  historyRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    minHeight: 52,
+    borderBottomWidth: 1,
+  },
+  historyRowCopy: {
+    flex: 1,
+    minWidth: 0,
+    paddingVertical: 8,
+  },
+  historyEmail: {
+    fontFamily: 'Inter_600SemiBold',
+    fontSize: 12,
+  },
+  historyMeta: {
+    marginTop: 4,
+    fontFamily: 'Inter_400Regular',
+    fontSize: 10,
+  },
+  clearHistoryButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    minHeight: 34,
+    paddingHorizontal: 10,
+    borderWidth: 1,
+    borderRadius: 10,
+    gap: 6,
+  },
+  clearHistoryText: {
+    fontFamily: 'Inter_600SemiBold',
+    fontSize: 11,
   },
   surnamePairList: {
     gap: 5,
