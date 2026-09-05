@@ -1,4 +1,4 @@
-name: Build Android APK
+name: Build Android Release
 
 on:
   push:
@@ -12,9 +12,11 @@ permissions:
 
 jobs:
   build-android:
-    name: Build debug APK
+    name: Build release APK and AAB
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      EXPO_PUBLIC_DOMAIN: example.invalid
 
     steps:
       - name: Check out repository
@@ -40,23 +42,56 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
 
+      - name: Verify Android SDK
+        run: |
+          test -n "$ANDROID_HOME"
+          test -d "$ANDROID_HOME"
+          test -x "$ANDROID_HOME/platform-tools/adb"
+
       - name: Install workspace dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Generate Android native project
+      - name: Check Expo dependency compatibility
         working-directory: artifacts/russian-email-generator
         env:
           CI: true
-        run: pnpm exec expo prebuild --platform android --no-install
+        run: pnpm exec expo install --check
 
-      - name: Build debug APK
+      - name: Type-check mobile app
+        run: pnpm --filter @workspace/russian-email-generator run typecheck
+
+      - name: Validate Android JavaScript bundle
+        working-directory: artifacts/russian-email-generator
+        env:
+          CI: true
+        run: pnpm exec expo export --platform android --output-dir /tmp/russian-email-generator-export --clear
+
+      - name: Generate clean Android native project
+        working-directory: artifacts/russian-email-generator
+        env:
+          CI: true
+        run: pnpm exec expo prebuild --platform android --no-install --clean
+
+      - name: Build release APK and AAB
         working-directory: artifacts/russian-email-generator/android
-        run: ./gradlew assembleDebug --no-daemon --stacktrace
+        run: |
+          chmod +x ./gradlew
+          ./gradlew bundleRelease assembleRelease --no-daemon --stacktrace
 
-      - name: Upload APK
+      - name: Verify release artifacts
+        working-directory: artifacts/russian-email-generator/android
+        run: |
+          test -s app/build/outputs/bundle/release/app-release.aab
+          test -s app/build/outputs/apk/release/app-release.apk
+          unzip -t app/build/outputs/bundle/release/app-release.aab
+          unzip -t app/build/outputs/apk/release/app-release.apk
+
+      - name: Upload release artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: russian-email-generator-debug-apk
-          path: artifacts/russian-email-generator/android/app/build/outputs/apk/debug/app-debug.apk
+          name: russian-email-generator-android-release
+          path: |
+            artifacts/russian-email-generator/android/app/build/outputs/bundle/release/app-release.aab
+            artifacts/russian-email-generator/android/app/build/outputs/apk/release/app-release.apk
           if-no-files-found: error
           retention-days: 14
