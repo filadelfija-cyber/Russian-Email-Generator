@@ -11,6 +11,8 @@
       "supportsTablet": false
     },
     "android": {
+      "package": "com.aliasstudio.russianemailgenerator",
+      "versionCode": 1,
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/icon.png",
         "backgroundColor": "#0E1525"
