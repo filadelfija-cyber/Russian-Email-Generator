@@ -57,6 +57,9 @@ jobs:
           CI: true
         run: pnpm exec expo install --check
 
+      - name: Build workspace TypeScript libraries
+        run: pnpm run typecheck:libs
+
       - name: Type-check mobile app
         run: pnpm --filter @workspace/russian-email-generator run typecheck
 
